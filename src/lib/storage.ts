@@ -1,5 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
-import path from 'node:path'
+import { Pool } from 'pg'
 import type {
   AvomaRawData,
   FeedbackStore,
@@ -8,127 +7,350 @@ import type {
   SlackRawData,
 } from '@/types'
 
-const DATA_DIR = path.join(process.cwd(), 'data')
+// ─── Connection Pool ──────────────────────────────────────────────────────────
 
-async function ensureDataDir(): Promise<void> {
-  await mkdir(DATA_DIR, { recursive: true })
-}
+let _pool: Pool | null = null
 
-async function readJSON<T>(filename: string, defaultValue: T): Promise<T> {
-  try {
-    const filePath = path.join(DATA_DIR, filename)
-    const raw = await readFile(filePath, 'utf8')
-    return JSON.parse(raw) as T
-  } catch {
-    return defaultValue
+function getPool(): Pool {
+  if (!_pool) {
+    if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is not set')
+    _pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+      max: 5,
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 10_000,
+    })
   }
+  return _pool
 }
 
-async function atomicWriteJSON(filename: string, data: unknown): Promise<void> {
-  await ensureDataDir()
-  const filePath = path.join(DATA_DIR, filename)
-  const tmpPath = filePath + '.tmp'
-  await writeFile(tmpPath, JSON.stringify(data, null, 2), 'utf8')
-  await rename(tmpPath, filePath)
+// ─── Schema Init (idempotent) ──────────────────────────────────────────────────
+
+let _schemaReady = false
+
+async function ensureSchema(): Promise<void> {
+  if (_schemaReady) return
+  const pool = getPool()
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS app_config (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      data JSONB NOT NULL DEFAULT '{}'
+    );
+    CREATE TABLE IF NOT EXISTS app_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS feedback_items (
+      id TEXT PRIMARY KEY,
+      data JSONB NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS avoma_meetings (
+      uuid TEXT PRIMARY KEY,
+      data JSONB NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS avoma_transcripts (
+      meeting_uuid TEXT PRIMARY KEY,
+      data JSONB NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS front_conversations (
+      id TEXT PRIMARY KEY,
+      data JSONB NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS front_messages (
+      id TEXT PRIMARY KEY,
+      data JSONB NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS slack_messages (
+      ts TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      data JSONB NOT NULL,
+      PRIMARY KEY (ts, channel)
+    );
+    CREATE TABLE IF NOT EXISTS slack_channels (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL
+    );
+  `)
+  _schemaReady = true
+}
+
+// ─── Bulk Upsert Helper ────────────────────────────────────────────────────────
+
+async function batchUpsert(
+  table: string,
+  idCol: string,
+  rows: { id: string; data: unknown }[],
+  onConflict: 'nothing' | 'update' = 'update'
+): Promise<void> {
+  if (rows.length === 0) return
+  const pool = getPool()
+  const client = await pool.connect()
+  try {
+    const BATCH = 200
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const batch = rows.slice(i, i + BATCH)
+      const values = batch.map((_, j) => `($${j * 2 + 1}, $${j * 2 + 2}::jsonb)`).join(', ')
+      const params = batch.flatMap((r) => [r.id, JSON.stringify(r.data)])
+      const conflict =
+        onConflict === 'update'
+          ? `ON CONFLICT (${idCol}) DO UPDATE SET data = EXCLUDED.data`
+          : `ON CONFLICT (${idCol}) DO NOTHING`
+      await client.query(
+        `INSERT INTO ${table} (${idCol}, data) VALUES ${values} ${conflict}`,
+        params
+      )
+    }
+  } finally {
+    client.release()
+  }
 }
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 export async function readConfig(): Promise<IntegrationConfig> {
-  return readJSON<IntegrationConfig>('config.json', {})
+  await ensureSchema()
+  const pool = getPool()
+  const res = await pool.query('SELECT data FROM app_config WHERE id = 1')
+  if (res.rows.length === 0) return {}
+  return res.rows[0].data as IntegrationConfig
 }
 
 export async function writeConfig(config: IntegrationConfig): Promise<void> {
-  await atomicWriteJSON('config.json', config)
+  await ensureSchema()
+  const pool = getPool()
+  await pool.query(`
+    INSERT INTO app_config (id, data) VALUES (1, $1::jsonb)
+    ON CONFLICT (id) DO UPDATE SET data = $1::jsonb
+  `, [JSON.stringify(config)])
 }
 
 // ─── Avoma Raw ────────────────────────────────────────────────────────────────
 
 export async function readAvomaRaw(): Promise<AvomaRawData | null> {
-  return readJSON<AvomaRawData | null>('avoma-raw.json', null)
+  await ensureSchema()
+  const pool = getPool()
+  const [meetings, transcripts, meta] = await Promise.all([
+    pool.query('SELECT data FROM avoma_meetings'),
+    pool.query('SELECT data FROM avoma_transcripts'),
+    pool.query("SELECT value FROM app_meta WHERE key = 'avoma_fetched_at'"),
+  ])
+  if (meetings.rows.length === 0 && transcripts.rows.length === 0) return null
+  return {
+    fetchedAt: meta.rows[0]?.value ?? new Date().toISOString(),
+    meetings: meetings.rows.map((r) => r.data),
+    transcripts: transcripts.rows.map((r) => r.data),
+  }
 }
 
 export async function writeAvomaRaw(data: AvomaRawData): Promise<void> {
-  await atomicWriteJSON('avoma-raw.json', data)
+  await ensureSchema()
+  const pool = getPool()
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query('TRUNCATE avoma_meetings, avoma_transcripts')
+    await client.query('COMMIT')
+  } catch (err) {
+    await client.query('ROLLBACK')
+    throw err
+  } finally {
+    client.release()
+  }
+  await batchUpsert('avoma_meetings', 'uuid', data.meetings.map((m) => ({ id: m.uuid, data: m })))
+  await batchUpsert('avoma_transcripts', 'meeting_uuid', data.transcripts.map((t) => ({ id: t.meetingUuid, data: t })))
+  const pool2 = getPool()
+  await pool2.query(
+    "INSERT INTO app_meta (key, value) VALUES ('avoma_fetched_at', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
+    [data.fetchedAt]
+  )
 }
 
 /** Merge new Avoma data into existing, deduplicating by uuid */
 export async function mergeAvomaRaw(newData: AvomaRawData): Promise<AvomaRawData> {
-  const existing = await readAvomaRaw()
-  if (!existing) {
-    await writeAvomaRaw(newData)
-    return newData
-  }
-  const meetingIds = new Set(existing.meetings.map((m) => m.uuid))
-  const transcriptIds = new Set(existing.transcripts.map((t) => t.meetingUuid))
-  const merged: AvomaRawData = {
-    fetchedAt: newData.fetchedAt,
-    meetings: [
-      ...existing.meetings,
-      ...newData.meetings.filter((m) => !meetingIds.has(m.uuid)),
-    ],
-    transcripts: [
-      ...existing.transcripts,
-      ...newData.transcripts.filter((t) => !transcriptIds.has(t.meetingUuid)),
-    ],
-  }
-  await writeAvomaRaw(merged)
-  return merged
+  await ensureSchema()
+  // Insert meetings (skip duplicates)
+  await batchUpsert(
+    'avoma_meetings',
+    'uuid',
+    newData.meetings.map((m) => ({ id: m.uuid, data: m })),
+    'nothing'
+  )
+  // Insert transcripts (skip duplicates)
+  await batchUpsert(
+    'avoma_transcripts',
+    'meeting_uuid',
+    newData.transcripts.map((t) => ({ id: t.meetingUuid, data: t })),
+    'nothing'
+  )
+  // Update fetched_at
+  const pool = getPool()
+  await pool.query(
+    "INSERT INTO app_meta (key, value) VALUES ('avoma_fetched_at', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
+    [newData.fetchedAt]
+  )
+  return (await readAvomaRaw())!
 }
 
 // ─── Front Raw ────────────────────────────────────────────────────────────────
 
 export async function readFrontRaw(): Promise<FrontRawData | null> {
-  return readJSON<FrontRawData | null>('front-raw.json', null)
+  await ensureSchema()
+  const pool = getPool()
+  const [convos, messages, meta] = await Promise.all([
+    pool.query('SELECT data FROM front_conversations'),
+    pool.query('SELECT data FROM front_messages'),
+    pool.query("SELECT value FROM app_meta WHERE key = 'front_fetched_at'"),
+  ])
+  if (convos.rows.length === 0 && messages.rows.length === 0) return null
+  return {
+    fetchedAt: meta.rows[0]?.value ?? new Date().toISOString(),
+    conversations: convos.rows.map((r) => r.data),
+    messages: messages.rows.map((r) => r.data),
+  }
 }
 
 export async function writeFrontRaw(data: FrontRawData): Promise<void> {
-  await atomicWriteJSON('front-raw.json', data)
+  await ensureSchema()
+  const pool = getPool()
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query('TRUNCATE front_conversations, front_messages')
+    await client.query('COMMIT')
+  } catch (err) {
+    await client.query('ROLLBACK')
+    throw err
+  } finally {
+    client.release()
+  }
+  await batchUpsert('front_conversations', 'id', data.conversations.map((c) => ({ id: c.id, data: c })))
+  await batchUpsert('front_messages', 'id', data.messages.map((m) => ({ id: m.id, data: m })))
+  const pool2 = getPool()
+  await pool2.query(
+    "INSERT INTO app_meta (key, value) VALUES ('front_fetched_at', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
+    [data.fetchedAt]
+  )
 }
 
 /** Merge new Front data into existing, deduplicating by id */
 export async function mergeFrontRaw(newData: FrontRawData): Promise<FrontRawData> {
-  const existing = await readFrontRaw()
-  if (!existing) {
-    await writeFrontRaw(newData)
-    return newData
-  }
-  const convoIds = new Set(existing.conversations.map((c) => c.id))
-  const msgIds = new Set(existing.messages.map((m) => m.id))
-  const merged: FrontRawData = {
-    fetchedAt: newData.fetchedAt,
-    conversations: [
-      ...existing.conversations,
-      ...newData.conversations.filter((c) => !convoIds.has(c.id)),
-    ],
-    messages: [
-      ...existing.messages,
-      ...newData.messages.filter((m) => !msgIds.has(m.id)),
-    ],
-  }
-  await writeFrontRaw(merged)
-  return merged
+  await ensureSchema()
+  await batchUpsert(
+    'front_conversations',
+    'id',
+    newData.conversations.map((c) => ({ id: c.id, data: c })),
+    'nothing'
+  )
+  await batchUpsert(
+    'front_messages',
+    'id',
+    newData.messages.map((m) => ({ id: m.id, data: m })),
+    'nothing'
+  )
+  const pool = getPool()
+  await pool.query(
+    "INSERT INTO app_meta (key, value) VALUES ('front_fetched_at', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
+    [newData.fetchedAt]
+  )
+  return (await readFrontRaw())!
 }
 
 // ─── Slack Raw ────────────────────────────────────────────────────────────────
 
 export async function readSlackRaw(): Promise<SlackRawData | null> {
-  return readJSON<SlackRawData | null>('slack-raw.json', null)
+  await ensureSchema()
+  const pool = getPool()
+  const [channels, messages, meta] = await Promise.all([
+    pool.query('SELECT id, name FROM slack_channels'),
+    pool.query('SELECT data FROM slack_messages'),
+    pool.query("SELECT value FROM app_meta WHERE key = 'slack_fetched_at'"),
+  ])
+  if (channels.rows.length === 0 && messages.rows.length === 0) return null
+  return {
+    fetchedAt: meta.rows[0]?.value ?? new Date().toISOString(),
+    channels: channels.rows.map((r) => ({ id: r.id, name: r.name })),
+    messages: messages.rows.map((r) => r.data),
+  }
 }
 
 export async function writeSlackRaw(data: SlackRawData): Promise<void> {
-  await atomicWriteJSON('slack-raw.json', data)
+  await ensureSchema()
+  const pool = getPool()
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query('TRUNCATE slack_messages, slack_channels')
+    // Insert channels
+    for (const ch of data.channels) {
+      await client.query(
+        'INSERT INTO slack_channels (id, name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET name = $2',
+        [ch.id, ch.name]
+      )
+    }
+    await client.query('COMMIT')
+  } catch (err) {
+    await client.query('ROLLBACK')
+    throw err
+  } finally {
+    client.release()
+  }
+  // Insert messages in batches
+  const rows = data.messages.map((m) => ({ id: `${m.channel}:${m.ts}`, data: m }))
+  if (rows.length > 0) {
+    const client2 = await pool.connect()
+    try {
+      const BATCH = 200
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const batch = rows.slice(i, i + BATCH)
+        const vals = batch
+          .map((_, j) => `($${j * 3 + 1}, $${j * 3 + 2}, $${j * 3 + 3}::jsonb)`)
+          .join(', ')
+        const params = batch.flatMap((r) => {
+          const m = r.data as { ts: string; channel: string }
+          return [m.ts, m.channel, JSON.stringify(r.data)]
+        })
+        await client2.query(
+          `INSERT INTO slack_messages (ts, channel, data) VALUES ${vals} ON CONFLICT (ts, channel) DO NOTHING`,
+          params
+        )
+      }
+    } finally {
+      client2.release()
+    }
+  }
+  await pool.query(
+    "INSERT INTO app_meta (key, value) VALUES ('slack_fetched_at', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
+    [data.fetchedAt]
+  )
 }
 
 // ─── Feedback Store ───────────────────────────────────────────────────────────
 
 export async function readFeedbackStore(): Promise<FeedbackStore> {
-  return readJSON<FeedbackStore>('feedback.json', {
-    lastAnalyzedAt: '',
-    items: [],
-  })
+  await ensureSchema()
+  const pool = getPool()
+  const [items, meta] = await Promise.all([
+    pool.query('SELECT data FROM feedback_items'),
+    pool.query("SELECT value FROM app_meta WHERE key = 'last_analyzed_at'"),
+  ])
+  return {
+    lastAnalyzedAt: meta.rows[0]?.value ?? '',
+    items: items.rows.map((r) => r.data),
+  }
 }
 
 export async function writeFeedbackStore(store: FeedbackStore): Promise<void> {
-  await atomicWriteJSON('feedback.json', store)
+  await ensureSchema()
+  await batchUpsert(
+    'feedback_items',
+    'id',
+    store.items.map((item) => ({ id: item.id, data: item })),
+    'update'
+  )
+  const pool = getPool()
+  await pool.query(
+    "INSERT INTO app_meta (key, value) VALUES ('last_analyzed_at', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
+    [store.lastAnalyzedAt]
+  )
 }
