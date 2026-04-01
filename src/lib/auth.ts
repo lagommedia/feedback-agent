@@ -1,8 +1,8 @@
-import { createHmac, timingSafeEqual } from 'crypto'
+// Uses Web Crypto API (works in both Edge Runtime and Node.js)
 
 const SECRET = process.env.AUTH_SECRET ?? 'zeni-feedback-secret-key-2026'
-const COOKIE_NAME = 'zf_session'
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 7 // 7 days
+export const COOKIE_NAME = 'zf_session'
+export const COOKIE_MAX_AGE = 60 * 60 * 24 * 7 // 7 days
 
 // Hardcoded credentials — can be extended to support multiple users later
 const USERS: Record<string, string> = {
@@ -12,32 +12,56 @@ const USERS: Record<string, string> = {
 export function validateCredentials(email: string, password: string): boolean {
   const stored = USERS[email.toLowerCase()]
   if (!stored) return false
-  try {
-    return timingSafeEqual(Buffer.from(stored), Buffer.from(password))
-  } catch {
-    return false
-  }
+  return stored === password
 }
 
-export function createSessionToken(email: string): string {
+// ─── Web Crypto helpers ───────────────────────────────────────────────────────
+
+async function getHmacKey(): Promise<CryptoKey> {
+  const keyData = new TextEncoder().encode(SECRET)
+  return crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, [
+    'sign',
+    'verify',
+  ])
+}
+
+function toBase64url(bytes: ArrayBuffer | Uint8Array): string {
+  const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
+  let b = ''
+  for (const byte of arr) b += String.fromCharCode(byte)
+  return btoa(b).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+}
+
+function fromBase64url(str: string): Uint8Array {
+  const b64 = str.replace(/-/g, '+').replace(/_/g, '/') + '=='.slice((str.length * 3) % 4)
+  const raw = atob(b64)
+  return new Uint8Array([...raw].map((c) => c.charCodeAt(0)))
+}
+
+// ─── Token helpers (async, Edge-compatible) ────────────────────────────────────
+
+export async function createSessionToken(email: string): Promise<string> {
   const payload = `${email}:${Date.now()}`
-  const sig = createHmac('sha256', SECRET).update(payload).digest('hex')
-  return Buffer.from(`${payload}:${sig}`).toString('base64url')
+  const payloadBytes = new TextEncoder().encode(payload)
+  const key = await getHmacKey()
+  const sig = await crypto.subtle.sign('HMAC', key, payloadBytes)
+  return `${toBase64url(payloadBytes)}.${toBase64url(sig)}`
 }
 
-export function verifySessionToken(token: string): string | null {
+export async function verifySessionToken(token: string): Promise<string | null> {
   try {
-    const decoded = Buffer.from(token, 'base64url').toString('utf8')
-    const lastColon = decoded.lastIndexOf(':')
-    const payload = decoded.slice(0, lastColon)
-    const sig = decoded.slice(lastColon + 1)
-    const expected = createHmac('sha256', SECRET).update(payload).digest('hex')
-    if (!timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null
-    const email = payload.split(':')[0]
-    return email
+    const dot = token.indexOf('.')
+    if (dot === -1) return null
+    const payloadB64 = token.slice(0, dot)
+    const sigB64 = token.slice(dot + 1)
+    const payloadBytes = fromBase64url(payloadB64)
+    const sigBytes = fromBase64url(sigB64)
+    const key = await getHmacKey()
+    const valid = await crypto.subtle.verify('HMAC', key, sigBytes.buffer as ArrayBuffer, payloadBytes.buffer as ArrayBuffer)
+    if (!valid) return null
+    const payload = new TextDecoder().decode(payloadBytes)
+    return payload.split(':')[0]
   } catch {
     return null
   }
 }
-
-export { COOKIE_NAME, COOKIE_MAX_AGE }
