@@ -42,3 +42,6 @@ next-env.d.ts
 
 # local data (API keys, synced data, feedback)
 /data
+
+# Vercel
+.vercel
