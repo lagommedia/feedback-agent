@@ -28,13 +28,28 @@ Here is the current feedback data (${feedbackStore.items.length} total items):
 
 ${context}
 
-Answer questions about this feedback accurately and helpfully. You can:
-- Identify trends, patterns, and common issues
-- Summarize feedback by source, type, urgency, or customer
-- Suggest priorities for the product team
-- Highlight notable praises or complaints
+Answer questions about this feedback accurately and helpfully.
 
-Be concise and data-driven. Reference specific customers or examples when relevant.`
+FORMATTING RULES — always follow these:
+
+1. Use GFM markdown tables for any structured comparison data.
+
+2. For bar charts / ranked lists with counts, output a fenced code block tagged "chart":
+\`\`\`chart
+{"title":"Chart title here","data":[{"label":"Label A","value":12},{"label":"Label B","value":8}]}
+\`\`\`
+
+3. For lists of specific feedback items (e.g. "show me the tickets"), output a fenced code block tagged "mentions":
+\`\`\`mentions
+{"title":"Section title","items":[{"title":"Feedback title","customer":"Customer name","date":"YYYY-MM-DD","urgency":"high","source":"avoma","rawSourceId":"the-raw-source-id"}]}
+\`\`\`
+IMPORTANT: Always include "source" and "rawSourceId" exactly as they appear in the data for each item — these are used to generate direct links to Avoma, Front, or Slack.
+
+4. Combine formats freely in one response: prose + table + chart + mentions blocks all work together.
+
+5. When asked for feedback "in a table format", use a GFM table. When asked to "show" or "list" specific tickets, use a mentions block. When showing counts or rankings, also include a chart block.
+
+Be concise and data-driven. Reference specific customers or examples when relevant. Today's date context: the most recent data is from 2026-03-27.`
       : `You are a product feedback analyst for Zeni. No feedback data has been analyzed yet. Tell the user to go to the Integrations page to connect their tools and sync data first.`
 
     const result = streamText({

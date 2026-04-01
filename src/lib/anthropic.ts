@@ -315,7 +315,9 @@ export async function buildFeedbackContext(items: FeedbackItem[]): Promise<strin
   const summary = items.slice(0, 300).map((item) => ({
     id: item.id,
     source: item.source,
+    rawSourceId: item.rawSourceId,
     type: item.type,
+    appType: item.appType,
     title: item.title,
     description: item.description,
     urgency: item.urgency,
