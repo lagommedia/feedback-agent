@@ -19,7 +19,7 @@ function buildSystemPrompt(categoryInstructions?: {
   product?: string
   service?: string
   churn?: string
-}): string {
+}, trainingExamples?: import('@/lib/storage').TrainingExample[]): string {
   const productGuide = categoryInstructions?.product
     ? `\n  Custom guidance: ${categoryInstructions.product}`
     : '\n  Default: software features, UI/UX, bugs, product functionality requests'
@@ -100,7 +100,22 @@ If appType is "churn_risk", choose from:
 - Support Dissatisfaction: repeated bad support experiences
 - Switching Intent: direct signals they are considering leaving Zeni
 
-If no relevant feedback is found, return [].`
+If no relevant feedback is found, return [].${
+  trainingExamples && trainingExamples.length > 0
+    ? `\n\nHuman-curated classification corrections (the Zeni team has reviewed past AI classifications and corrected them — apply these learnings when classifying similar content):\n\n${
+        trainingExamples
+          .slice(0, 50)
+          .map((ex, i) => {
+            const correction =
+              ex.correctAppType === null
+                ? 'REMOVE — should not be extracted as feedback at all'
+                : `RECLASSIFY as "${ex.correctAppType}" (was "${ex.originalAppType}")`
+            return `[${i + 1}] Title: "${ex.feedbackTitle}"\n    Content: "${ex.feedbackDescription.slice(0, 200)}..."\n    Correction: ${correction}\n    Reason: "${ex.notes}"`
+          })
+          .join('\n\n')
+      }`
+    : ''
+}`
 }
 
 interface RawContentItem {
@@ -220,7 +235,8 @@ export async function analyzeAllContent(
   front: FrontRawData | null,
   slack: SlackRawData | null,
   existingItems: FeedbackItem[],
-  instructions?: { avoma?: string; front?: string; slack?: string; general?: string; product?: string; service?: string; churn?: string }
+  instructions?: { avoma?: string; front?: string; slack?: string; general?: string; product?: string; service?: string; churn?: string },
+  trainingExamples?: import('@/lib/storage').TrainingExample[]
 ): Promise<FeedbackItem[]> {
   const client = new Anthropic({ apiKey })
   const systemPrompt = buildSystemPrompt({
@@ -228,7 +244,7 @@ export async function analyzeAllContent(
     product: instructions?.product,
     service: instructions?.service,
     churn: instructions?.churn,
-  })
+  }, trainingExamples)
   const analyzedIds = new Set(existingItems.map((i) => i.rawSourceId))
 
   const allItems: RawContentItem[] = []

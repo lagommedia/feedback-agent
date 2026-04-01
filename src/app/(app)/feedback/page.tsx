@@ -156,6 +156,8 @@ function FeedbackList() {
   const [editing, setEditing] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState<{ type: FeedbackType; appType: AppType; customer: string; rep: string; tags: string[] } | null>(null)
   const [saving, setSaving] = useState(false)
+  const [trainState, setTrainState] = useState<Record<string, { action: string; notes: string }>>({})
+  const [submittingTrain, setSubmittingTrain] = useState<string | null>(null)
   const [drawerItem, setDrawerItem] = useState<FeedbackItem | null>(null)
 
   function startEdit(item: FeedbackItem) {
@@ -166,6 +168,40 @@ function FeedbackList() {
   function cancelEdit() {
     setEditing(null)
     setEditDraft(null)
+  }
+
+  async function submitTraining(item: FeedbackItem) {
+    const state = trainState[item.id]
+    if (!state?.action || !state?.notes?.trim()) return
+    setSubmittingTrain(item.id)
+    try {
+      const [action, targetType] = state.action.split(':')
+      const res = await fetch(`/api/feedback/${item.id}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, targetType, notes: state.notes }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        alert(data.error ?? 'Failed to apply')
+        return
+      }
+      // Update local state
+      if (data.action === 'removed') {
+        setItems((prev) => prev.filter((i) => i.id !== item.id))
+        setExpanded(null)
+      } else if (data.action === 'moved' && data.item) {
+        setItems((prev) => prev.map((i) => (i.id === item.id ? data.item : i)))
+      }
+      // Clear train state for this item
+      setTrainState((prev) => {
+        const next = { ...prev }
+        delete next[item.id]
+        return next
+      })
+    } finally {
+      setSubmittingTrain(null)
+    }
   }
 
   async function saveEdit(id: string) {
@@ -575,6 +611,54 @@ function FeedbackList() {
                       <MessageSquarePlus className="w-3.5 h-3.5" />
                       Feedback
                     </button>
+                  </div>
+
+                  {/* Training section */}
+                  <div className="mt-4 pt-4 border-t border-border/60">
+                    <p className="text-xs font-medium text-muted-foreground mb-2.5">Train Classifier</p>
+                    <div className="flex flex-col gap-2">
+                      <select
+                        value={trainState[item.id]?.action ?? ''}
+                        onChange={(e) =>
+                          setTrainState((prev) => ({
+                            ...prev,
+                            [item.id]: { ...prev[item.id], action: e.target.value, notes: prev[item.id]?.notes ?? '' },
+                          }))
+                        }
+                        className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring [color-scheme:dark]"
+                      >
+                        <option value="">Select an action…</option>
+                        <option value="remove">Remove — not useful feedback</option>
+                        <option value="move:product">Move to Product Feedback</option>
+                        <option value="move:service">Move to Service Feedback</option>
+                        <option value="move:churn_risk">Move to Churn Risk</option>
+                      </select>
+                      {trainState[item.id]?.action && (
+                        <>
+                          <textarea
+                            rows={2}
+                            placeholder="Why? Your notes help train future classifications… (required)"
+                            value={trainState[item.id]?.notes ?? ''}
+                            onChange={(e) =>
+                              setTrainState((prev) => ({
+                                ...prev,
+                                [item.id]: { ...prev[item.id], notes: e.target.value },
+                              }))
+                            }
+                            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none [color-scheme:dark]"
+                          />
+                          <div className="flex justify-end">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); submitTraining(item) }}
+                              disabled={!trainState[item.id]?.notes?.trim() || submittingTrain === item.id}
+                              className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              {submittingTrain === item.id ? 'Applying…' : 'Apply Training'}
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}

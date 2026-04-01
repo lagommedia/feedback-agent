@@ -76,6 +76,16 @@ async function ensureSchema(): Promise<void> {
       password TEXT NOT NULL,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS training_examples (
+      id SERIAL PRIMARY KEY,
+      feedback_id TEXT,
+      original_app_type TEXT,
+      correct_app_type TEXT,
+      notes TEXT NOT NULL,
+      feedback_title TEXT,
+      feedback_description TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
   `)
   _schemaReady = true
 }
@@ -410,4 +420,58 @@ export async function deleteUser(email: string): Promise<void> {
   await ensureSchema()
   const pool = getPool()
   await pool.query('DELETE FROM app_users WHERE email = $1', [email.toLowerCase()])
+}
+
+// ─── Training Examples ─────────────────────────────────────────────────────────
+
+export interface TrainingExample {
+  originalAppType: string
+  correctAppType: string | null  // null = should be removed/not feedback
+  notes: string
+  feedbackTitle: string
+  feedbackDescription: string
+  createdAt: string
+}
+
+export async function saveTrainingExample(example: {
+  feedbackId: string
+  originalAppType: string
+  correctAppType: string | null
+  notes: string
+  feedbackTitle: string
+  feedbackDescription: string
+}): Promise<void> {
+  await ensureSchema()
+  const pool = getPool()
+  await pool.query(
+    `INSERT INTO training_examples (feedback_id, original_app_type, correct_app_type, notes, feedback_title, feedback_description)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [
+      example.feedbackId,
+      example.originalAppType,
+      example.correctAppType,
+      example.notes,
+      example.feedbackTitle,
+      example.feedbackDescription,
+    ]
+  )
+}
+
+export async function getTrainingExamples(): Promise<TrainingExample[]> {
+  await ensureSchema()
+  const pool = getPool()
+  const res = await pool.query(
+    `SELECT original_app_type, correct_app_type, notes, feedback_title, feedback_description, created_at
+     FROM training_examples
+     ORDER BY created_at DESC
+     LIMIT 100`
+  )
+  return res.rows.map((r) => ({
+    originalAppType: r.original_app_type,
+    correctAppType: r.correct_app_type,
+    notes: r.notes,
+    feedbackTitle: r.feedback_title,
+    feedbackDescription: r.feedback_description,
+    createdAt: r.created_at,
+  }))
 }

@@ -6,6 +6,7 @@ import {
   readFrontRaw,
   readSlackRaw,
   writeFeedbackStore,
+  getTrainingExamples,
 } from '@/lib/storage'
 import { analyzeAllContent } from '@/lib/anthropic'
 
@@ -21,11 +22,12 @@ export async function POST() {
       )
     }
 
-    const [avoma, front, slack, feedbackStore] = await Promise.all([
+    const [avoma, front, slack, feedbackStore, trainingExamples] = await Promise.all([
       readAvomaRaw(),
       readFrontRaw(),
       readSlackRaw(),
       readFeedbackStore(),
+      getTrainingExamples(),
     ])
 
     if (!avoma && !front && !slack) {
@@ -49,7 +51,8 @@ export async function POST() {
         product: config.anthropic?.productInstructions,
         service: config.anthropic?.serviceInstructions,
         churn: config.anthropic?.churnInstructions,
-      }
+      },
+      trainingExamples
     )
 
     const updatedStore = {
