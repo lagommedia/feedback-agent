@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { validateCredentials, createSessionToken, COOKIE_NAME, COOKIE_MAX_AGE } from '@/lib/auth'
+import { createSessionToken, COOKIE_NAME, COOKIE_MAX_AGE } from '@/lib/auth'
+import { validateUserCredentials } from '@/lib/storage'
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,7 +10,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email and password are required.' }, { status: 400 })
     }
 
-    if (!validateCredentials(email, password)) {
+    if (!(await validateUserCredentials(email, password))) {
       return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 })
     }
 

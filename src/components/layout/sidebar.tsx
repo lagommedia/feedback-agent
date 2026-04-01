@@ -12,6 +12,7 @@ import {
   ChevronDown,
   Check,
   LogOut,
+  Users,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSyncContext } from '@/components/layout/sync-context'
@@ -24,6 +25,7 @@ const navItems = [
   { href: '/feedback', label: 'Feedback Items', icon: List },
   { href: '/chat', label: 'AI Chat', icon: MessageSquare },
   { href: '/reports', label: 'Reports', icon: FileText },
+  { href: '/users', label: 'Users', icon: Users },
 ]
 
 const APP_OPTIONS: Array<{ value: AppType | 'all'; label: string }> = [
