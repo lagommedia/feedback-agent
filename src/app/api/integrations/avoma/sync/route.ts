@@ -11,13 +11,11 @@ export async function POST() {
       return NextResponse.json({ error: 'Avoma is not configured' }, { status: 400 })
     }
 
-    const initialStart = new Date('2026-01-01')
     const yesterday = new Date()
     yesterday.setDate(yesterday.getDate() - 1)
     yesterday.setHours(0, 0, 0, 0)
-    const since = config.avoma.lastSyncedAt ? yesterday : initialStart
 
-    const data = await syncAvoma(config.avoma.apiKey, since)
+    const data = await syncAvoma(config.avoma.apiKey, yesterday)
     const merged = await mergeAvomaRaw(data)
 
     // Update last synced

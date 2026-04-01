@@ -19,13 +19,11 @@ export async function POST() {
       )
     }
 
-    const initialStart = new Date('2026-03-01')
     const yesterday = new Date()
     yesterday.setDate(yesterday.getDate() - 1)
     yesterday.setHours(0, 0, 0, 0)
-    const since = config.slack.lastSyncedAt ? yesterday : initialStart
 
-    const data = await syncSlack(config.slack.botToken, channelIds, since)
+    const data = await syncSlack(config.slack.botToken, channelIds, yesterday)
     await writeSlackRaw(data)
 
     const updatedConfig = {
