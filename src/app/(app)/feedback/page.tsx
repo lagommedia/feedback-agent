@@ -157,7 +157,6 @@ function FeedbackList() {
   const [editDraft, setEditDraft] = useState<{ type: FeedbackType; appType: AppType; customer: string; rep: string; tags: string[] } | null>(null)
   const [saving, setSaving] = useState(false)
   const [trainState, setTrainState] = useState<Record<string, { action: string; notes: string }>>({})
-  const [submittingTrain, setSubmittingTrain] = useState<string | null>(null)
   const [drawerItem, setDrawerItem] = useState<FeedbackItem | null>(null)
 
   function startEdit(item: FeedbackItem) {
@@ -173,34 +172,45 @@ function FeedbackList() {
   async function submitTraining(item: FeedbackItem) {
     const state = trainState[item.id]
     if (!state?.action || !state?.notes?.trim()) return
-    setSubmittingTrain(item.id)
+
+    const [action, targetType] = state.action.split(':')
+
+    // Optimistic update — reflect immediately in UI
+    if (action === 'remove') {
+      setItems((prev) => prev.filter((i) => i.id !== item.id))
+      setExpanded(null)
+    } else {
+      setItems((prev) => prev.map((i) => i.id === item.id ? { ...i, appType: targetType as AppType } : i))
+    }
+    setTrainState((prev) => { const next = { ...prev }; delete next[item.id]; return next })
+
+    // Persist in background — revert on failure
     try {
-      const [action, targetType] = state.action.split(':')
       const res = await fetch(`/api/feedback/${item.id}/action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, targetType, notes: state.notes }),
       })
-      const data = await res.json()
       if (!res.ok) {
-        alert(data.error ?? 'Failed to apply')
-        return
+        const data = await res.json()
+        // Revert
+        if (action === 'remove') {
+          setItems((prev) => [item, ...prev])
+          setExpanded(item.id)
+        } else {
+          setItems((prev) => prev.map((i) => i.id === item.id ? item : i))
+        }
+        alert(data.error ?? 'Failed to apply — change reverted')
       }
-      // Update local state
-      if (data.action === 'removed') {
-        setItems((prev) => prev.filter((i) => i.id !== item.id))
-        setExpanded(null)
-      } else if (data.action === 'moved' && data.item) {
-        setItems((prev) => prev.map((i) => (i.id === item.id ? data.item : i)))
+    } catch {
+      // Revert on network error
+      if (action === 'remove') {
+        setItems((prev) => [item, ...prev])
+        setExpanded(item.id)
+      } else {
+        setItems((prev) => prev.map((i) => i.id === item.id ? item : i))
       }
-      // Clear train state for this item
-      setTrainState((prev) => {
-        const next = { ...prev }
-        delete next[item.id]
-        return next
-      })
-    } finally {
-      setSubmittingTrain(null)
+      alert('Network error — change reverted')
     }
   }
 
@@ -650,10 +660,10 @@ function FeedbackList() {
                           <div className="flex justify-end">
                             <button
                               onClick={(e) => { e.stopPropagation(); submitTraining(item) }}
-                              disabled={!trainState[item.id]?.notes?.trim() || submittingTrain === item.id}
+                              disabled={!trainState[item.id]?.notes?.trim()}
                               className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                             >
-                              {submittingTrain === item.id ? 'Applying…' : 'Apply Training'}
+                              Apply Training
                             </button>
                           </div>
                         </>
