@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
-  readFeedbackStore,
-  writeFeedbackStore,
+  getFeedbackItem,
+  deleteFeedbackItem,
+  updateFeedbackItemAppType,
   saveTrainingExample,
 } from '@/lib/storage'
 
@@ -23,8 +24,7 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid targetType.' }, { status: 400 })
     }
 
-    const store = await readFeedbackStore()
-    const item = store.items.find((i) => i.id === id)
+    const item = await getFeedbackItem(id)
     if (!item) {
       return NextResponse.json({ error: 'Feedback item not found.' }, { status: 404 })
     }
@@ -40,19 +40,11 @@ export async function POST(
     })
 
     if (action === 'remove') {
-      // Delete from store
-      const updated = { ...store, items: store.items.filter((i) => i.id !== id) }
-      await writeFeedbackStore(updated)
+      await deleteFeedbackItem(id)
       return NextResponse.json({ ok: true, action: 'removed' })
     } else {
-      // Update appType
-      const updatedItem = { ...item, appType: targetType }
-      const updated = {
-        ...store,
-        items: store.items.map((i) => (i.id === id ? updatedItem : i)),
-      }
-      await writeFeedbackStore(updated)
-      return NextResponse.json({ ok: true, action: 'moved', item: updatedItem })
+      await updateFeedbackItemAppType(id, targetType)
+      return NextResponse.json({ ok: true, action: 'moved', item: { ...item, appType: targetType } })
     }
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })

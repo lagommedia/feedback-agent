@@ -340,6 +340,30 @@ export async function writeSlackRaw(data: SlackRawData): Promise<void> {
   )
 }
 
+// ─── Feedback Item Operations ─────────────────────────────────────────────────
+
+export async function deleteFeedbackItem(id: string): Promise<void> {
+  await ensureSchema()
+  const pool = getPool()
+  await pool.query('DELETE FROM feedback_items WHERE id = $1', [id])
+}
+
+export async function updateFeedbackItemAppType(id: string, appType: string): Promise<void> {
+  await ensureSchema()
+  const pool = getPool()
+  await pool.query(
+    "UPDATE feedback_items SET data = data || jsonb_build_object('appType', $1::text) WHERE id = $2",
+    [appType, id]
+  )
+}
+
+export async function getFeedbackItem(id: string): Promise<import('@/types').FeedbackItem | null> {
+  await ensureSchema()
+  const pool = getPool()
+  const res = await pool.query('SELECT data FROM feedback_items WHERE id = $1', [id])
+  return res.rows[0]?.data ?? null
+}
+
 // ─── Feedback Store ───────────────────────────────────────────────────────────
 
 export async function readFeedbackStore(): Promise<FeedbackStore> {
