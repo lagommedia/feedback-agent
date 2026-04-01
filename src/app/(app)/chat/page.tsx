@@ -61,24 +61,24 @@ function ChartBlock({ content }: { content: string }) {
         )}
         <ResponsiveContainer width="100%" height={height}>
           <BarChart data={data} layout="vertical" margin={{ left: 8, right: 24, top: 0, bottom: 0 }}>
-            <XAxis type="number" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
+            <XAxis type="number" tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
             <YAxis
               type="category"
               dataKey="label"
               width={150}
-              tick={{ fontSize: 11, fill: 'hsl(var(--foreground))' }}
+              tick={{ fontSize: 11, fill: '#e5e7eb' }}
               axisLine={false}
               tickLine={false}
             />
             <Tooltip
-              contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }}
+              contentStyle={{ background: '#1c1c1c', border: '1px solid #333', borderRadius: 8, fontSize: 12, color: '#e5e7eb' }}
               formatter={(v) => [v, 'Count']}
             />
             <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={24}>
               {data.map((_, i) => (
                 <Cell
                   key={i}
-                  fill={`hsl(var(--primary) / ${Math.max(0.35, 1 - i * (0.55 / Math.max(data.length - 1, 1)))})`}
+                  fill={`rgba(74,222,128,${Math.max(0.35, 1 - i * (0.55 / Math.max(data.length - 1, 1)))})`}
                 />
               ))}
             </Bar>
@@ -94,6 +94,7 @@ function ChartBlock({ content }: { content: string }) {
 // ─── Mentions block ───────────────────────────────────────────────────────────
 
 interface MentionItem {
+  id?: string
   title: string
   customer?: string
   date?: string
@@ -145,7 +146,16 @@ function MentionsBlock({ content }: { content: string }) {
                   className="px-3 py-2 flex items-start justify-between gap-2 hover:bg-muted/20 transition-colors"
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium leading-snug">{item.title}</p>
+                    {item.id ? (
+                      <Link
+                        href={`/feedback?id=${item.id}`}
+                        className="text-xs font-medium leading-snug hover:text-primary hover:underline transition-colors line-clamp-2"
+                      >
+                        {item.title}
+                      </Link>
+                    ) : (
+                      <p className="text-xs font-medium leading-snug">{item.title}</p>
+                    )}
                     <p className="text-[11px] text-muted-foreground mt-0.5">
                       {[
                         item.customer,

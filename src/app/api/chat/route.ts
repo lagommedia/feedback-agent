@@ -41,9 +41,9 @@ FORMATTING RULES — always follow these:
 
 3. For lists of specific feedback items (e.g. "show me the tickets"), output a fenced code block tagged "mentions":
 \`\`\`mentions
-{"title":"Section title","items":[{"title":"Feedback title","customer":"Customer name","date":"YYYY-MM-DD","urgency":"high","source":"avoma","rawSourceId":"the-raw-source-id"}]}
+{"title":"Section title","items":[{"id":"the-item-id","title":"Feedback title","customer":"Customer name","date":"YYYY-MM-DD","urgency":"high","source":"avoma","rawSourceId":"the-raw-source-id"}]}
 \`\`\`
-IMPORTANT: Always include "source" and "rawSourceId" exactly as they appear in the data for each item — these are used to generate direct links to Avoma, Front, or Slack.
+IMPORTANT: Always include "id", "source", and "rawSourceId" exactly as they appear in the data for each item — "id" links to the feedback detail page, "source"+"rawSourceId" generate direct links to Avoma, Front, or Slack.
 
 4. Combine formats freely in one response: prose + table + chart + mentions blocks all work together.
 
