@@ -11,13 +11,11 @@ export async function POST() {
       return NextResponse.json({ error: 'Front is not configured' }, { status: 400 })
     }
 
-    const initialStart = new Date('2026-01-01')
     const yesterday = new Date()
     yesterday.setDate(yesterday.getDate() - 1)
     yesterday.setHours(0, 0, 0, 0)
-    const since = config.front.lastSyncedAt ? yesterday : initialStart
 
-    const data = await syncFront(config.front.bearerToken, since)
+    const data = await syncFront(config.front.bearerToken, yesterday)
     const merged = await mergeFrontRaw(data)
 
     const updatedConfig = {

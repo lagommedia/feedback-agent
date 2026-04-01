@@ -83,12 +83,13 @@ async function fetchAllConversations(
   const conversations: FrontRawConversation[] = []
   const params = new URLSearchParams({ limit: '100', sort_by: 'date', sort_order: 'desc' })
 
-  if (since) {
-    params.set('q[after]', Math.floor(since.getTime() / 1000).toString())
-  } else {
-    const jan1 = new Date('2026-01-01')
-    params.set('q[after]', Math.floor(jan1.getTime() / 1000).toString())
-  }
+  const sinceDate = since ?? (() => {
+    const d = new Date()
+    d.setDate(d.getDate() - 1)
+    d.setHours(0, 0, 0, 0)
+    return d
+  })()
+  params.set('q[after]', Math.floor(sinceDate.getTime() / 1000).toString())
 
   let url: string | null = `${BASE_URL}/conversations?${params}`
   let page = 0
