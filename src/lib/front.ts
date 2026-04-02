@@ -41,9 +41,11 @@ async function fetchWithRetry(url: string, token: string, retries = 4): Promise<
 
 // Internal email domains / senders to exclude
 const INTERNAL_DOMAINS = ['zeni.ai', 'usezeni.ai']
+
 const AUTOMATED_SENDER_NAMES = [
   'Front Notifications', 'Auto-Receipt', 'no-reply', 'noreply',
-  'notifications', 'donotreply', 'do-not-reply',
+  'notifications', 'donotreply', 'do-not-reply', 'mailer-daemon',
+  'postmaster', 'bounce', 'support@', 'hello@', 'info@', 'team@',
 ]
 const AUTOMATED_SUBJECT_PATTERNS = [
   /^report domain:/i,
@@ -53,9 +55,22 @@ const AUTOMATED_SUBJECT_PATTERNS = [
   /^out of office/i,
   /^automatic reply/i,
   /delivery (failure|notification|status)/i,
+  /^invoice #/i,
+  /^receipt for/i,
+  /^your (order|payment|subscription|account)/i,
+  /^(payment|invoice|receipt) (received|confirmed|due|reminder)/i,
+  /^verify your email/i,
+  /^confirm your/i,
+  /^welcome to/i,
+  /^you have been (added|invited)/i,
+  /^\[?notification\]?:/i,
+  /^security alert/i,
+  /^action required:/i,
+  /newsletter/i,
+  /^unsubscribe/i,
 ]
 
-function isCustomerConversation(convo: FrontRawConversation): boolean {
+function isCustomerConversation(convo: FrontRawConversation, internalEmails: string[]): boolean {
   const recipient = convo.recipient as Record<string, unknown> | undefined
   const handle = String((recipient?.handle as string) ?? '').toLowerCase()
   const name = String((recipient?.name as string) ?? '').toLowerCase()
@@ -63,6 +78,9 @@ function isCustomerConversation(convo: FrontRawConversation): boolean {
 
   // Exclude internal Zeni-to-Zeni conversations
   if (INTERNAL_DOMAINS.some(d => handle.endsWith(`@${d}`))) return false
+
+  // Exclude conversations with internal rep email addresses
+  if (internalEmails.some(e => handle === e.toLowerCase())) return false
 
   // Exclude automated/system senders
   if (AUTOMATED_SENDER_NAMES.some(n => name.includes(n.toLowerCase()))) return false
@@ -76,43 +94,67 @@ function isCustomerConversation(convo: FrontRawConversation): boolean {
   return true
 }
 
-async function fetchAllConversations(
+async function fetchConversationPage(
   token: string,
-  since?: Date
+  baseUrl: string,
+  since: Date,
+  internalEmails: string[]
 ): Promise<FrontRawConversation[]> {
   const conversations: FrontRawConversation[] = []
   const params = new URLSearchParams({ limit: '100', sort_by: 'date', sort_order: 'desc' })
+  params.set('q[after]', Math.floor(since.getTime() / 1000).toString())
 
-  const sinceDate = since ?? (() => {
-    const d = new Date()
-    d.setDate(d.getDate() - 1)
-    d.setHours(0, 0, 0, 0)
-    return d
-  })()
-  params.set('q[after]', Math.floor(sinceDate.getTime() / 1000).toString())
-
-  let url: string | null = `${BASE_URL}/conversations?${params}`
+  let url: string | null = `${baseUrl}?${params}`
   let page = 0
   let totalFetched = 0
 
   while (url) {
     page++
-    console.log(`[Front] Fetching page ${page} (${totalFetched} total, ${conversations.length} customer so far)...`)
+    console.log(`[Front] Fetching page ${page} from ${baseUrl} (${totalFetched} total, ${conversations.length} kept so far)...`)
     const res = await fetchWithRetry(url, token)
     if (!res.ok) throw new Error(`Front conversations API error: ${res.status} ${await res.text()}`)
     const data = await res.json()
     const batch: FrontRawConversation[] = data._results ?? []
     totalFetched += batch.length
 
-    // Only keep genuine customer conversations
-    const customerBatch = batch.filter(isCustomerConversation)
+    const customerBatch = batch.filter(c => isCustomerConversation(c, internalEmails))
     conversations.push(...customerBatch)
 
     url = data._pagination?.next ?? null
   }
 
-  console.log(`[Front] Done. ${totalFetched} total fetched, ${conversations.length} customer conversations kept.`)
+  console.log(`[Front] Done with ${baseUrl}. ${totalFetched} fetched, ${conversations.length} kept.`)
   return conversations
+}
+
+async function fetchAllConversations(
+  token: string,
+  since?: Date,
+  internalEmails: string[] = [],
+  inboxIds: string[] = []
+): Promise<FrontRawConversation[]> {
+  const sinceDate = since ?? (() => {
+    const d = new Date()
+    d.setDate(d.getDate() - 1)
+    d.setHours(0, 0, 0, 0)
+    return d
+  })()
+
+  if (inboxIds.length > 0) {
+    // Fetch only from specified inboxes — much more targeted
+    const results = await Promise.all(
+      inboxIds.map(id =>
+        fetchConversationPage(token, `${BASE_URL}/inboxes/${id}/conversations`, sinceDate, internalEmails)
+      )
+    )
+    const all = results.flat()
+    // Deduplicate by conversation ID (same convo can appear in multiple inboxes)
+    const seen = new Set<string>()
+    return all.filter(c => seen.has(c.id) ? false : (seen.add(c.id), true))
+  }
+
+  // Fallback: fetch all conversations (no inbox filter configured)
+  return fetchConversationPage(token, `${BASE_URL}/conversations`, sinceDate, internalEmails)
 }
 
 async function fetchConversationMessages(
@@ -152,8 +194,8 @@ async function fetchConversationMessages(
   return messages
 }
 
-export async function syncFront(token: string, since?: Date): Promise<FrontRawData> {
-  const conversations = await fetchAllConversations(token, since)
+export async function syncFront(token: string, since?: Date, internalEmails: string[] = [], inboxIds: string[] = []): Promise<FrontRawData> {
+  const conversations = await fetchAllConversations(token, since, internalEmails, inboxIds)
 
   const allMessages: FrontRawMessage[] = []
   const CONCURRENCY = 5

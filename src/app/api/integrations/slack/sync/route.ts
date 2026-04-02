@@ -19,11 +19,17 @@ export async function POST() {
       )
     }
 
-    const yesterday = new Date()
-    yesterday.setDate(yesterday.getDate() - 1)
-    yesterday.setHours(0, 0, 0, 0)
+    const MAX_LOOKBACK_DAYS = 7
+    const maxLookback = new Date()
+    maxLookback.setDate(maxLookback.getDate() - MAX_LOOKBACK_DAYS)
+    maxLookback.setHours(0, 0, 0, 0)
 
-    const data = await syncSlack(config.slack.botToken, channelIds, yesterday)
+    const lastSyncedAt = config.slack.lastSyncedAt
+    const since = lastSyncedAt
+      ? new Date(Math.max(new Date(lastSyncedAt).getTime(), maxLookback.getTime()))
+      : maxLookback
+
+    const data = await syncSlack(config.slack.botToken, channelIds, since)
     await writeSlackRaw(data)
 
     const updatedConfig = {

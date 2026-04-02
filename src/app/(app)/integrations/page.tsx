@@ -22,7 +22,7 @@ export default function IntegrationsPage() {
   const { states, anthropicConfigured, refreshConfig, syncSource } = useSyncContext()
 
   const [avoma, setAvoma] = useState({ apiKey: '', instructions: '' })
-  const [front, setFront] = useState({ bearerToken: '', instructions: '' })
+  const [front, setFront] = useState({ bearerToken: '', instructions: '', internalEmails: '', inboxIds: '' })
   const [slack, setSlack] = useState({ botToken: '', channelIds: '', instructions: '' })
   const [anthropic, setAnthropic] = useState({ apiKey: '', instructions: '', productInstructions: '', serviceInstructions: '', churnInstructions: '' })
   const [saving, setSaving] = useState<string | null>(null)
@@ -33,7 +33,14 @@ export default function IntegrationsPage() {
       .then((r) => r.json())
       .then(({ config }) => {
         if (config?.avoma?.instructions) setAvoma((s) => ({ ...s, instructions: config.avoma.instructions }))
-        if (config?.front?.instructions) setFront((s) => ({ ...s, instructions: config.front.instructions }))
+        if (config?.front) {
+          setFront((s) => ({
+            ...s,
+            instructions: config.front.instructions ?? s.instructions,
+            internalEmails: (config.front.internalEmails ?? []).join('\n'),
+            inboxIds: (config.front.inboxIds ?? []).join('\n'),
+          }))
+        }
         if (config?.slack?.instructions) setSlack((s) => ({ ...s, instructions: config.slack.instructions }))
         if (config?.anthropic) {
           setAnthropic((s) => ({
@@ -225,23 +232,56 @@ export default function IntegrationsPage() {
           instructions={front.instructions}
           instructionsPlaceholder="E.g. 'Only extract feedback about the Zeni software product. Ignore billing disputes and general account inquiries.'"
           onInstructionsChange={(v) => setFront((s) => ({ ...s, instructions: v }))}
-          onSave={() => saveConfig('front', { bearerToken: front.bearerToken, instructions: front.instructions })}
+          onSave={() => saveConfig('front', {
+            bearerToken: front.bearerToken,
+            instructions: front.instructions,
+            internalEmails: front.internalEmails.split('\n').map((s) => s.trim()).filter(Boolean),
+            inboxIds: front.inboxIds.split('\n').map((s) => s.trim()).filter(Boolean),
+          })}
           onSync={() => syncSource('front')}
           saving={saving === 'front'}
         >
-          <div>
-            <Label htmlFor="front-token">Bearer Token</Label>
-            <Input
-              id="front-token"
-              type="password"
-              placeholder="Your Front API bearer token"
-              value={front.bearerToken}
-              onChange={(e) => setFront((s) => ({ ...s, bearerToken: e.target.value }))}
-              className="mt-1"
-            />
-            <p className="text-xs text-muted-foreground mt-1">
-              Generate a token in Front → Settings → Developers → API tokens
-            </p>
+          <div className="space-y-3">
+            <div>
+              <Label htmlFor="front-token">Bearer Token</Label>
+              <Input
+                id="front-token"
+                type="password"
+                placeholder="Your Front API bearer token"
+                value={front.bearerToken}
+                onChange={(e) => setFront((s) => ({ ...s, bearerToken: e.target.value }))}
+                className="mt-1"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Generate a token in Front → Settings → Developers → API tokens
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="front-inbox-ids">Inbox IDs to Sync (one per line)</Label>
+              <textarea
+                id="front-inbox-ids"
+                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 min-h-[80px] font-mono"
+                placeholder={"inb_abc123\ninb_def456"}
+                value={front.inboxIds}
+                onChange={(e) => setFront((s) => ({ ...s, inboxIds: e.target.value }))}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                <strong>Recommended.</strong> Only sync conversations from these inboxes (e.g. Customer Success, Support). Leave blank to sync all inboxes. Find IDs in Front → Settings → Inboxes → click an inbox → copy the ID from the URL.
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="front-internal-emails">Internal Rep Emails to Exclude (one per line)</Label>
+              <textarea
+                id="front-internal-emails"
+                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 min-h-[80px] font-mono"
+                placeholder={"alice@zeni.ai\nbob@zeni.ai\ncarol@usezeni.ai"}
+                value={front.internalEmails}
+                onChange={(e) => setFront((s) => ({ ...s, internalEmails: e.target.value }))}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Conversations where the recipient is one of these addresses will be excluded from sync. Useful for filtering out sales and BDR rep email threads.
+              </p>
+            </div>
           </div>
         </IntegrationCard>
 

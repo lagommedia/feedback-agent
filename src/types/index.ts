@@ -10,6 +10,8 @@ export interface IntegrationConfig {
     bearerToken: string
     lastSyncedAt?: string
     instructions?: string
+    internalEmails?: string[]
+    inboxIds?: string[]
   }
   slack?: {
     botToken: string

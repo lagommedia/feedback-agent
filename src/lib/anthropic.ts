@@ -312,20 +312,20 @@ export async function analyzeAllContent(
 }
 
 export async function buildFeedbackContext(items: FeedbackItem[]): Promise<string> {
-  const summary = items.slice(0, 300).map((item) => ({
+  const summary = items.slice(0, 200).map((item) => ({
     id: item.id,
     source: item.source,
     rawSourceId: item.rawSourceId,
     type: item.type,
     appType: item.appType,
     title: item.title,
-    description: item.description,
+    description: item.description.slice(0, 200),
     urgency: item.urgency,
     customer: item.customer,
     rep: item.rep,
     date: item.date,
   }))
-  return JSON.stringify(summary, null, 2)
+  return JSON.stringify(summary)
 }
 
 export async function generateReport(
@@ -345,7 +345,18 @@ export async function generateReport(
     })
   }
 
-  const context = JSON.stringify(filteredItems, null, 2)
+  const context = JSON.stringify(filteredItems.map((item) => ({
+    source: item.source,
+    type: item.type,
+    appType: item.appType,
+    title: item.title,
+    description: item.description.slice(0, 300),
+    urgency: item.urgency,
+    customer: item.customer,
+    rep: item.rep,
+    date: item.date,
+    tags: item.tags,
+  })))
 
   const reportPrompts: Record<ReportRequest['type'], string> = {
     weekly_summary: `Generate a comprehensive weekly product feedback summary. Include:

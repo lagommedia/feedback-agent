@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifySessionToken, COOKIE_NAME } from '@/lib/auth'
 
-const PUBLIC_PATHS = ['/login', '/api/auth/login']
+const PUBLIC_PATHS = ['/login', '/api/']
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
-  // Allow public paths and static assets
+  // Allow public paths, API routes, and static assets
   if (
     PUBLIC_PATHS.some((p) => pathname.startsWith(p)) ||
     pathname.startsWith('/_next') ||
