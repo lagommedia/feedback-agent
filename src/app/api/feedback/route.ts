@@ -15,6 +15,7 @@ export async function GET(req: NextRequest) {
     const from = searchParams.get('from')
     const to = searchParams.get('to')
     const appType = searchParams.get('appType') as AppType | null
+    const assignedTo = searchParams.get('assignedTo')
     const limit = parseInt(searchParams.get('limit') ?? '100')
     const offset = parseInt(searchParams.get('offset') ?? '0')
 
@@ -63,6 +64,9 @@ export async function GET(req: NextRequest) {
     if (to) {
       items = items.filter((i) => i.date <= to)
     }
+    if (assignedTo) {
+      items = items.filter((i) => i.assignedTo === assignedTo)
+    }
 
     // Sort by date desc
     items.sort((a, b) => b.date.localeCompare(a.date))
@@ -82,7 +86,7 @@ export async function GET(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    const { id, type, customer, rep, tags, appType } = await req.json()
+    const { id, type, customer, rep, tags, appType, assignedTo } = await req.json()
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
     const store = await readFeedbackStore()
@@ -97,6 +101,7 @@ export async function PATCH(req: NextRequest) {
               ...(rep !== undefined && { rep }),
               ...(tags !== undefined && { tags }),
               ...(appType !== undefined && { appType: appType as AppType }),
+              ...(assignedTo !== undefined && { assignedTo: assignedTo || undefined }),
             }
           : i
       ),

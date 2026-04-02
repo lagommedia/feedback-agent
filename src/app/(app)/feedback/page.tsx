@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { AlertCircle, ThumbsUp, Lightbulb, ChevronDown, ChevronUp, Search, Loader2, Pencil, Check, X as XIcon, MessageSquarePlus, ExternalLink } from 'lucide-react'
+import { AlertCircle, ThumbsUp, Lightbulb, ChevronDown, ChevronUp, Search, Loader2, Pencil, Check, X as XIcon, MessageSquarePlus, ExternalLink, UserCircle } from 'lucide-react'
 import type { FeedbackItem, FeedbackSource, FeedbackType, UrgencyLevel, AppType } from '@/types'
 import { PRODUCT_TAGS, SERVICE_TAGS, CHURN_TAGS, TAGS_BY_APP_TYPE, APP_TYPES } from '@/types'
 import { FeedbackDrawer } from '@/components/feedback/feedback-drawer'
@@ -158,6 +158,14 @@ function FeedbackList() {
   const [saving, setSaving] = useState(false)
   const [trainState, setTrainState] = useState<Record<string, { action: string; notes: string }>>({})
   const [drawerItem, setDrawerItem] = useState<FeedbackItem | null>(null)
+  const [currentUser, setCurrentUser] = useState<string | null>(null)
+  const [users, setUsers] = useState<{ email: string }[]>([])
+  const [assignedToFilter, setAssignedToFilter] = useState<string>('')
+
+  useEffect(() => {
+    fetch('/api/auth/me').then(r => r.json()).then(d => setCurrentUser(d.email ?? null))
+    fetch('/api/users').then(r => r.json()).then(d => setUsers(d.users ?? []))
+  }, [])
 
   function startEdit(item: FeedbackItem) {
     setEditing(item.id)
@@ -214,6 +222,15 @@ function FeedbackList() {
     }
   }
 
+  async function saveAssignment(id: string, email: string) {
+    setItems((prev) => prev.map((i) => i.id === id ? { ...i, assignedTo: email || undefined } : i))
+    await fetch('/api/feedback', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, assignedTo: email }),
+    })
+  }
+
   async function saveEdit(id: string) {
     if (!editDraft) return
     setSaving(true)
@@ -264,6 +281,7 @@ function FeedbackList() {
       if (urgencyFilter) params.append('urgency', urgencyFilter)
       if (tagFilter) params.append('tag', tagFilter)
       if (search) params.set('search', search)
+      if (assignedToFilter) params.set('assignedTo', assignedToFilter)
     }
     if (appParam) params.set('appType', appParam)
     params.set('limit', '100')
@@ -278,14 +296,14 @@ function FeedbackList() {
     } finally {
       setLoading(false)
     }
-  }, [idParam, isDateView, fromParam, toParam, search, typeFilter, urgencyFilter, tagFilter, appParam, searchParams])
+  }, [idParam, isDateView, fromParam, toParam, search, typeFilter, urgencyFilter, tagFilter, assignedToFilter, appParam, searchParams])
 
   useEffect(() => {
     const t = setTimeout(fetchItems, 200)
     return () => clearTimeout(t)
   }, [fetchItems])
 
-  const hasFilters = !!(typeFilter || urgencyFilter || tagFilter || search)
+  const hasFilters = !!(typeFilter || urgencyFilter || tagFilter || search || assignedToFilter)
 
   return (
     <div className="p-8">
@@ -323,6 +341,22 @@ function FeedbackList() {
             className="pl-9"
           />
         </div>
+        {currentUser && (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground font-medium px-0.5">Assigned</span>
+            <button
+              onClick={() => setAssignedToFilter(assignedToFilter === currentUser ? '' : currentUser)}
+              className={`h-9 px-3 rounded-md text-xs font-medium border transition-colors ${
+                assignedToFilter === currentUser
+                  ? 'bg-primary/15 text-primary border-primary/30'
+                  : 'bg-background text-muted-foreground border-input hover:text-foreground'
+              }`}
+            >
+              <UserCircle className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />
+              My Items
+            </button>
+          </div>
+        )}
         <div className="flex flex-col gap-1">
           <span className="text-xs text-muted-foreground font-medium px-0.5">
             {appParam === 'service' ? 'Service Areas' : appParam === 'churn_risk' ? 'Churn Reasons' : 'Product Areas'}
@@ -376,6 +410,7 @@ function FeedbackList() {
               setTypeFilter('')
               setUrgencyFilter('')
               setTagFilter('')
+              setAssignedToFilter('')
             }}
           >
             Clear filters
@@ -420,6 +455,14 @@ function FeedbackList() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  {item.assignedTo && (
+                    <span
+                      className="hidden sm:flex items-center justify-center w-5 h-5 rounded-full bg-primary/20 text-primary text-[9px] font-bold shrink-0"
+                      title={`Assigned to ${item.assignedTo}`}
+                    >
+                      {item.assignedTo.slice(0, 2).toUpperCase()}
+                    </span>
+                  )}
                   {!appParam && (
                     <AppTypeBadge appType={item.appType} />
                   )}
@@ -610,6 +653,24 @@ function FeedbackList() {
                   ) : null}
 
                   <p className="text-sm leading-relaxed">{item.description}</p>
+
+                  {/* Assignment */}
+                  <div className="flex items-center gap-2 mt-3">
+                    <UserCircle className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <span className="text-xs text-muted-foreground">Assigned to</span>
+                    <select
+                      value={item.assignedTo ?? ''}
+                      onChange={(e) => { e.stopPropagation(); saveAssignment(item.id, e.target.value) }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="h-6 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring [color-scheme:dark]"
+                    >
+                      <option value="">Unassigned</option>
+                      {users.map((u) => (
+                        <option key={u.email} value={u.email}>{u.email}</option>
+                      ))}
+                    </select>
+                  </div>
+
                   <div className="flex items-end justify-between mt-3">
                     <p className="text-xs text-muted-foreground">
                       Source ID: <span className="font-mono">{item.rawSourceId}</span> · Analyzed {new Date(item.analyzedAt).toLocaleString()}

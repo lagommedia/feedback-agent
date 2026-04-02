@@ -178,6 +178,7 @@ export interface FeedbackItem {
   tags: string[]
   rawSourceId: string
   analyzedAt: string
+  assignedTo?: string  // user email
 }
 
 export interface FeedbackStore {

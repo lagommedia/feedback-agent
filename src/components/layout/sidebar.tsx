@@ -68,6 +68,19 @@ function SidebarInner() {
   const { states, anthropicConfigured } = useSyncContext()
   const [open, setOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const [myAssignedCount, setMyAssignedCount] = useState(0)
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then(r => r.json())
+      .then(({ email }) => {
+        if (!email) return
+        return fetch(`/api/feedback?assignedTo=${encodeURIComponent(email)}&limit=0`)
+          .then(r => r.json())
+          .then(d => setMyAssignedCount(d.total ?? 0))
+      })
+      .catch(() => {})
+  }, [])
 
   const currentApp = (searchParams.get('app') as AppType | 'all') ?? 'all'
   const currentAppLabel = APP_OPTIONS.find((o) => o.value === currentApp)?.label ?? 'All Feedback'
@@ -178,6 +191,11 @@ function SidebarInner() {
               <span className="flex-1">{label}</span>
               {showSyncDot && (
                 <span className="w-2 h-2 rounded-full bg-primary animate-pulse shrink-0" />
+              )}
+              {href === '/feedback' && myAssignedCount > 0 && (
+                <span className="flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-primary text-primary-foreground text-[10px] font-bold px-1 shrink-0">
+                  {myAssignedCount}
+                </span>
               )}
             </Link>
           )
