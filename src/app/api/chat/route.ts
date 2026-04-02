@@ -1,6 +1,6 @@
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { streamText } from 'ai'
-import { readConfig, readFeedbackStore } from '@/lib/storage'
+import { readConfig, getRecentFeedbackItems } from '@/lib/storage'
 import { buildFeedbackContext } from '@/lib/anthropic'
 
 export const maxDuration = 120
@@ -18,13 +18,13 @@ export async function POST(req: Request) {
     const { messages } = await req.json()
     const anthropic = createAnthropic({ apiKey: config.anthropic.apiKey })
 
-    const feedbackStore = await readFeedbackStore()
-    const context = await buildFeedbackContext(feedbackStore.items)
+    const recentItems = await getRecentFeedbackItems(200)
+    const context = await buildFeedbackContext(recentItems)
 
-    const systemPrompt = feedbackStore.items.length > 0
+    const systemPrompt = recentItems.length > 0
       ? `You are a product feedback analyst for Zeni, a financial software company. You have access to structured feedback data extracted from customer calls (Avoma), emails (Front), and internal Slack messages.
 
-Here is the current feedback data (${feedbackStore.items.length} total items):
+Here is the current feedback data (most recent 200 items):
 
 ${context}
 
@@ -51,6 +51,7 @@ IMPORTANT: Always include "id", "source", and "rawSourceId" exactly as they appe
 
 Be concise and data-driven. Reference specific customers or examples when relevant. Today's date context: the most recent data is from 2026-03-27.`
       : `You are a product feedback analyst for Zeni. No feedback data has been analyzed yet. Tell the user to go to the Integrations page to connect their tools and sync data first.`
+
 
     const result = streamText({
       model: anthropic('claude-sonnet-4-6'),

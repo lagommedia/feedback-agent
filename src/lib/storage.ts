@@ -470,6 +470,18 @@ export async function deleteUser(email: string): Promise<void> {
   await pool.query('DELETE FROM app_users WHERE email = $1', [email.toLowerCase()])
 }
 
+// ─── Chat Context Items ───────────────────────────────────────────────────────
+
+export async function getRecentFeedbackItems(limit = 200): Promise<import('@/types').FeedbackItem[]> {
+  await ensureSchema()
+  const pool = getPool()
+  const res = await pool.query(
+    `SELECT data FROM feedback_items ORDER BY (data->>'date') DESC LIMIT $1`,
+    [limit]
+  )
+  return res.rows.map((r) => r.data)
+}
+
 // ─── Distinct Customers ───────────────────────────────────────────────────────
 
 export async function getDistinctCustomers(): Promise<string[]> {
