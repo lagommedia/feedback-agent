@@ -61,9 +61,12 @@ Be concise and data-driven. Reference specific customers or examples when releva
 
     return result.toDataStreamResponse()
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
+    // Return the error through the AI data stream so useChat surfaces the real message
+    const message = err instanceof Error ? err.message : String(err)
+    const encoded = new TextEncoder().encode(`3:${JSON.stringify(message)}\n`)
+    return new Response(encoded, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
     })
   }
 }
