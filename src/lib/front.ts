@@ -101,8 +101,11 @@ async function fetchConversationPage(
   internalEmails: string[]
 ): Promise<FrontRawConversation[]> {
   const conversations: FrontRawConversation[] = []
+  const sinceTs = Math.floor(since.getTime() / 1000)
   const params = new URLSearchParams({ limit: '100', sort_by: 'date', sort_order: 'desc' })
-  params.set('q[after]', Math.floor(since.getTime() / 1000).toString())
+  // q[after] works on the global endpoint; inbox endpoints ignore it, so we
+  // also enforce the cutoff manually by stopping when we see older conversations
+  params.set('q[after]', sinceTs.toString())
 
   let url: string | null = `${baseUrl}?${params}`
   let page = 0
@@ -117,8 +120,16 @@ async function fetchConversationPage(
     const batch: FrontRawConversation[] = data._results ?? []
     totalFetched += batch.length
 
-    const customerBatch = batch.filter(c => isCustomerConversation(c, internalEmails))
+    // Results are newest-first — stop as soon as we hit conversations older than `since`
+    const withinWindow = batch.filter(c => (c.created_at ?? 0) >= sinceTs)
+    const customerBatch = withinWindow.filter(c => isCustomerConversation(c, internalEmails))
     conversations.push(...customerBatch)
+
+    if (withinWindow.length < batch.length) {
+      // Hit the date boundary — no need to fetch further pages
+      console.log(`[Front] Reached date boundary on page ${page}, stopping.`)
+      break
+    }
 
     url = data._pagination?.next ?? null
   }
