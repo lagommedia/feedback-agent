@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { AlertCircle, ThumbsUp, Lightbulb, ChevronDown, ChevronUp, Search, Loader2, Pencil, Check, X as XIcon, MessageSquarePlus, ExternalLink, UserCircle } from 'lucide-react'
+import { AlertCircle, ThumbsUp, Lightbulb, ChevronDown, ChevronUp, Search, Loader2, Pencil, Check, X as XIcon, MessageSquarePlus, ExternalLink, UserCircle, Building2 } from 'lucide-react'
 import type { FeedbackItem, FeedbackSource, FeedbackType, UrgencyLevel, AppType } from '@/types'
 import { PRODUCT_TAGS, SERVICE_TAGS, CHURN_TAGS, TAGS_BY_APP_TYPE, APP_TYPES } from '@/types'
 import { FeedbackDrawer } from '@/components/feedback/feedback-drawer'
@@ -236,6 +236,97 @@ function AssigneeSelector({
   )
 }
 
+function CompanyFilter({
+  value,
+  options,
+  onChange,
+}: {
+  value: string
+  options: string[]
+  onChange: (v: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  const filtered = options.filter((c) =>
+    c.toLowerCase().includes(query.toLowerCase())
+  ).slice(0, 50)
+
+  useEffect(() => {
+    if (open) {
+      setQuery('')
+      setTimeout(() => inputRef.current?.focus(), 0)
+    }
+  }, [open])
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  return (
+    <div ref={containerRef} className="flex flex-col gap-1 relative">
+      <span className="text-xs text-muted-foreground font-medium px-0.5">Company</span>
+      {value && !open ? (
+        <div className="flex items-center gap-1 h-9">
+          <button
+            onClick={() => setOpen(true)}
+            className="flex items-center gap-1.5 rounded-full bg-primary/15 text-primary text-xs font-medium px-2.5 py-1 hover:bg-primary/25 transition-colors max-w-[160px]"
+          >
+            <Building2 className="w-3 h-3 shrink-0" />
+            <span className="truncate">{value}</span>
+          </button>
+          <button
+            onClick={() => onChange('')}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+            title="Clear company filter"
+          >
+            <XIcon className="w-3 h-3" />
+          </button>
+        </div>
+      ) : (
+        <div className="relative">
+          <Building2 className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Search company…"
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setOpen(true) }}
+            onFocus={() => setOpen(true)}
+            className="h-9 w-44 pl-8 pr-3 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+          />
+          {open && (
+            <div className="absolute top-full mt-1 left-0 w-56 bg-popover border border-border rounded-lg shadow-lg z-50 py-1 max-h-56 overflow-y-auto">
+              {filtered.length === 0 ? (
+                <p className="px-3 py-2 text-xs text-muted-foreground">No companies found</p>
+              ) : (
+                filtered.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => { onChange(c); setOpen(false) }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-muted/50 transition-colors"
+                  >
+                    <Building2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <span className="truncate">{c}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function FeedbackPage() {
   return (
     <Suspense fallback={<div className="p-8 text-muted-foreground text-sm">Loading...</div>}>
@@ -265,10 +356,13 @@ function FeedbackList() {
   const [currentUser, setCurrentUser] = useState<string | null>(null)
   const [users, setUsers] = useState<{ email: string }[]>([])
   const [assignedToFilter, setAssignedToFilter] = useState<string>('')
+  const [companyFilter, setCompanyFilter] = useState<string>('')
+  const [allCustomers, setAllCustomers] = useState<string[]>([])
 
   useEffect(() => {
     fetch('/api/auth/me').then(r => r.json()).then(d => setCurrentUser(d.email ?? null))
     fetch('/api/users').then(r => r.json()).then(d => setUsers(d.users ?? []))
+    fetch('/api/feedback/customers').then(r => r.json()).then(d => setAllCustomers(d.customers ?? []))
   }, [])
 
   function startEdit(item: FeedbackItem) {
@@ -386,6 +480,7 @@ function FeedbackList() {
       if (tagFilter) params.append('tag', tagFilter)
       if (search) params.set('search', search)
       if (assignedToFilter) params.set('assignedTo', assignedToFilter)
+      if (companyFilter) params.set('customer', companyFilter)
     }
     if (appParam) params.set('appType', appParam)
     params.set('limit', '100')
@@ -400,14 +495,14 @@ function FeedbackList() {
     } finally {
       setLoading(false)
     }
-  }, [idParam, isDateView, fromParam, toParam, search, typeFilter, urgencyFilter, tagFilter, assignedToFilter, appParam, searchParams])
+  }, [idParam, isDateView, fromParam, toParam, search, typeFilter, urgencyFilter, tagFilter, assignedToFilter, companyFilter, appParam, searchParams])
 
   useEffect(() => {
     const t = setTimeout(fetchItems, 200)
     return () => clearTimeout(t)
   }, [fetchItems])
 
-  const hasFilters = !!(typeFilter || urgencyFilter || tagFilter || search || assignedToFilter)
+  const hasFilters = !!(typeFilter || urgencyFilter || tagFilter || search || assignedToFilter || companyFilter)
 
   return (
     <div className="p-8">
@@ -445,6 +540,11 @@ function FeedbackList() {
             className="pl-9"
           />
         </div>
+        <CompanyFilter
+          value={companyFilter}
+          options={allCustomers}
+          onChange={setCompanyFilter}
+        />
         {currentUser && (
           <div className="flex flex-col gap-1">
             <span className="text-xs text-muted-foreground font-medium px-0.5">Assigned</span>
@@ -515,6 +615,7 @@ function FeedbackList() {
               setUrgencyFilter('')
               setTagFilter('')
               setAssignedToFilter('')
+              setCompanyFilter('')
             }}
           >
             Clear filters

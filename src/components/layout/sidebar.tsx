@@ -20,12 +20,12 @@ import type { AppType } from '@/types'
 import { APP_TYPES } from '@/types'
 
 const navItems = [
-  { href: '/', label: 'Dashboard', icon: BarChart3 },
-  { href: '/integrations', label: 'Integrations', icon: Link2 },
-  { href: '/feedback', label: 'Feedback Items', icon: List },
-  { href: '/chat', label: 'AI Chat', icon: MessageSquare },
-  { href: '/reports', label: 'Reports', icon: FileText },
-  { href: '/users', label: 'Users', icon: Users },
+  { href: '/', label: 'Dashboard', icon: BarChart3, permission: 'dashboard' },
+  { href: '/integrations', label: 'Integrations', icon: Link2, permission: 'integrations' },
+  { href: '/feedback', label: 'Feedback Items', icon: List, permission: 'feedback' },
+  { href: '/chat', label: 'AI Chat', icon: MessageSquare, permission: 'chat' },
+  { href: '/reports', label: 'Reports', icon: FileText, permission: 'reports' },
+  { href: '/users', label: 'Users', icon: Users, permission: 'users' },
 ]
 
 const APP_OPTIONS: Array<{ value: AppType | 'all'; label: string }> = [
@@ -69,11 +69,13 @@ function SidebarInner() {
   const [open, setOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const [myAssignedCount, setMyAssignedCount] = useState(0)
+  const [permissions, setPermissions] = useState<string[] | null>(null)
 
   useEffect(() => {
     fetch('/api/auth/me')
       .then(r => r.json())
-      .then(({ email }) => {
+      .then(({ email, permissions: perms }) => {
+        setPermissions(perms ?? null)
         if (!email) return
         return fetch(`/api/feedback?assignedTo=${encodeURIComponent(email)}&limit=0`)
           .then(r => r.json())
@@ -173,7 +175,7 @@ function SidebarInner() {
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-0.5">
-        {navItems.map(({ href, label, icon: Icon }) => {
+        {navItems.filter(({ permission }) => permissions === null || permissions.includes(permission)).map(({ href, label, icon: Icon }) => {
           const isActive = href === '/' ? pathname === '/' : pathname.startsWith(href)
           const showSyncDot = href === '/integrations' && isSyncing
           return (

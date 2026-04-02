@@ -74,8 +74,10 @@ async function ensureSchema(): Promise<void> {
     CREATE TABLE IF NOT EXISTS app_users (
       email TEXT PRIMARY KEY,
       password TEXT NOT NULL,
-      created_at TIMESTAMPTZ DEFAULT NOW()
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      permissions JSONB NOT NULL DEFAULT '["dashboard","integrations","feedback","chat","reports","users"]'::jsonb
     );
+    ALTER TABLE app_users ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '["dashboard","integrations","feedback","chat","reports","users"]'::jsonb;
     CREATE TABLE IF NOT EXISTS training_examples (
       id SERIAL PRIMARY KEY,
       feedback_id TEXT,
@@ -396,18 +398,25 @@ export async function writeFeedbackStore(store: FeedbackStore): Promise<void> {
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 
-export async function getUsers(): Promise<Array<{ email: string; createdAt: string }>> {
+export const ALL_PERMISSIONS = ['dashboard', 'integrations', 'feedback', 'chat', 'reports', 'users'] as const
+export type Permission = (typeof ALL_PERMISSIONS)[number]
+
+export async function getUsers(): Promise<Array<{ email: string; createdAt: string; permissions: string[] }>> {
   await ensureSchema()
   const pool = getPool()
-  const res = await pool.query('SELECT email, created_at FROM app_users ORDER BY created_at ASC')
+  const res = await pool.query('SELECT email, created_at, permissions FROM app_users ORDER BY created_at ASC')
   // If no users, seed the default admin
   if (res.rows.length === 0) {
     await pool.query(
       "INSERT INTO app_users (email, password) VALUES ('ben@zeni.ai', '$Zeni1234!') ON CONFLICT DO NOTHING"
     )
-    return [{ email: 'ben@zeni.ai', createdAt: new Date().toISOString() }]
+    return [{ email: 'ben@zeni.ai', createdAt: new Date().toISOString(), permissions: [...ALL_PERMISSIONS] }]
   }
-  return res.rows.map((r) => ({ email: r.email, createdAt: r.created_at }))
+  return res.rows.map((r) => ({
+    email: r.email,
+    createdAt: r.created_at,
+    permissions: Array.isArray(r.permissions) ? r.permissions : [...ALL_PERMISSIONS],
+  }))
 }
 
 export async function validateUserCredentials(email: string, password: string): Promise<boolean> {
@@ -425,13 +434,28 @@ export async function validateUserCredentials(email: string, password: string): 
   return res.rows[0].password === password
 }
 
-export async function createUser(email: string, password: string): Promise<void> {
+export async function createUser(email: string, password: string, permissions?: string[]): Promise<void> {
   await ensureSchema()
   const pool = getPool()
+  const perms = permissions ?? [...ALL_PERMISSIONS]
   await pool.query(
-    'INSERT INTO app_users (email, password) VALUES ($1, $2)',
-    [email.toLowerCase(), password]
+    'INSERT INTO app_users (email, password, permissions) VALUES ($1, $2, $3::jsonb)',
+    [email.toLowerCase(), password, JSON.stringify(perms)]
   )
+}
+
+export async function updateUserPermissions(email: string, permissions: string[]): Promise<void> {
+  await ensureSchema()
+  const pool = getPool()
+  await pool.query('UPDATE app_users SET permissions = $1::jsonb WHERE email = $2', [JSON.stringify(permissions), email.toLowerCase()])
+}
+
+export async function getUserPermissions(email: string): Promise<string[]> {
+  await ensureSchema()
+  const pool = getPool()
+  const res = await pool.query('SELECT permissions FROM app_users WHERE email = $1', [email.toLowerCase()])
+  if (res.rows.length === 0) return [...ALL_PERMISSIONS]
+  return Array.isArray(res.rows[0].permissions) ? res.rows[0].permissions : [...ALL_PERMISSIONS]
 }
 
 export async function updateUserPassword(email: string, password: string): Promise<void> {
@@ -444,6 +468,22 @@ export async function deleteUser(email: string): Promise<void> {
   await ensureSchema()
   const pool = getPool()
   await pool.query('DELETE FROM app_users WHERE email = $1', [email.toLowerCase()])
+}
+
+// ─── Distinct Customers ───────────────────────────────────────────────────────
+
+export async function getDistinctCustomers(): Promise<string[]> {
+  await ensureSchema()
+  const pool = getPool()
+  const res = await pool.query(`
+    SELECT DISTINCT data->>'customer' AS customer
+    FROM feedback_items
+    WHERE data->>'customer' IS NOT NULL
+      AND data->>'customer' != ''
+      AND data->>'customer' != 'Unknown'
+    ORDER BY customer
+  `)
+  return res.rows.map((r: { customer: string }) => r.customer)
 }
 
 // ─── Training Examples ─────────────────────────────────────────────────────────

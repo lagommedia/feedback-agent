@@ -16,6 +16,7 @@ export async function GET(req: NextRequest) {
     const to = searchParams.get('to')
     const appType = searchParams.get('appType') as AppType | null
     const assignedTo = searchParams.get('assignedTo')
+    const customer = searchParams.get('customer')
     const limit = parseInt(searchParams.get('limit') ?? '100')
     const offset = parseInt(searchParams.get('offset') ?? '0')
 
@@ -66,6 +67,9 @@ export async function GET(req: NextRequest) {
     }
     if (assignedTo) {
       items = items.filter((i) => i.assignedTo === assignedTo)
+    }
+    if (customer) {
+      items = items.filter((i) => i.customer === customer)
     }
 
     // Sort by date desc

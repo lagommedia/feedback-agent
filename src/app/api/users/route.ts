@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getUsers, createUser } from '@/lib/storage'
+import { getUsers, createUser, getUserPermissions } from '@/lib/storage'
+import { verifySessionToken, COOKIE_NAME } from '@/lib/auth'
 
 export async function GET() {
   try {
@@ -12,14 +13,23 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { email, password } = await req.json()
+    // Verify caller has 'users' permission
+    const token = req.cookies.get(COOKIE_NAME)?.value
+    const callerEmail = token ? await verifySessionToken(token) : null
+    if (!callerEmail) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const callerPerms = await getUserPermissions(callerEmail)
+    if (!callerPerms.includes('users')) {
+      return NextResponse.json({ error: 'You do not have permission to create users.' }, { status: 403 })
+    }
+
+    const { email, password, permissions } = await req.json()
     if (!email || !password) {
       return NextResponse.json({ error: 'Email and password are required.' }, { status: 400 })
     }
     if (password.length < 8) {
       return NextResponse.json({ error: 'Password must be at least 8 characters.' }, { status: 400 })
     }
-    await createUser(email, password)
+    await createUser(email, password, permissions ?? undefined)
     return NextResponse.json({ ok: true })
   } catch (err) {
     const msg = String(err)
