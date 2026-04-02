@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, Suspense } from 'react'
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Card, CardContent } from '@/components/ui/card'
@@ -130,6 +130,110 @@ function typeLabel(type: FeedbackType) {
 
 function sourceLabel(source: FeedbackSource) {
   return source === 'avoma' ? 'Avoma' : source === 'front' ? 'Front' : 'Slack'
+}
+
+function AssigneeSelector({
+  assignedTo,
+  users,
+  onAssign,
+}: {
+  assignedTo?: string
+  users: { email: string }[]
+  onAssign: (email: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  const filtered = users.filter((u) =>
+    u.email.toLowerCase().includes(query.replace(/^@/, '').toLowerCase())
+  )
+
+  useEffect(() => {
+    if (open) {
+      setQuery('')
+      setTimeout(() => inputRef.current?.focus(), 0)
+    }
+  }, [open])
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  function select(email: string) {
+    onAssign(email)
+    setOpen(false)
+  }
+
+  return (
+    <div ref={containerRef} className="relative flex items-center gap-2">
+      <UserCircle className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+      <span className="text-xs text-muted-foreground">Assigned to</span>
+
+      {assignedTo && !open ? (
+        <div className="flex items-center gap-1">
+          <button
+            onClick={(e) => { e.stopPropagation(); setOpen(true) }}
+            className="flex items-center gap-1.5 rounded-full bg-primary/15 text-primary text-xs font-medium px-2.5 py-0.5 hover:bg-primary/25 transition-colors"
+          >
+            <span className="w-4 h-4 rounded-full bg-primary/30 flex items-center justify-center text-[9px] font-bold shrink-0">
+              {assignedTo.slice(0, 2).toUpperCase()}
+            </span>
+            {assignedTo}
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onAssign('') }}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+            title="Unassign"
+          >
+            <XIcon className="w-3 h-3" />
+          </button>
+        </div>
+      ) : open ? (
+        <div className="flex flex-col">
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false) }}
+            placeholder="@name or email..."
+            className="h-6 w-48 rounded-md border border-primary/50 bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+          {filtered.length > 0 && (
+            <div className="absolute top-full left-6 mt-1 w-56 bg-popover border border-border rounded-lg shadow-lg z-50 py-1 overflow-hidden">
+              {filtered.map((u) => (
+                <button
+                  key={u.email}
+                  onClick={(e) => { e.stopPropagation(); select(u.email) }}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-muted/60 transition-colors"
+                >
+                  <span className="w-5 h-5 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[9px] font-bold shrink-0">
+                    {u.email.slice(0, 2).toUpperCase()}
+                  </span>
+                  {u.email}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <button
+          onClick={(e) => { e.stopPropagation(); setOpen(true) }}
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          + Assign
+        </button>
+      )}
+    </div>
+  )
 }
 
 export default function FeedbackPage() {
@@ -655,20 +759,12 @@ function FeedbackList() {
                   <p className="text-sm leading-relaxed">{item.description}</p>
 
                   {/* Assignment */}
-                  <div className="flex items-center gap-2 mt-3">
-                    <UserCircle className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                    <span className="text-xs text-muted-foreground">Assigned to</span>
-                    <select
-                      value={item.assignedTo ?? ''}
-                      onChange={(e) => { e.stopPropagation(); saveAssignment(item.id, e.target.value) }}
-                      onClick={(e) => e.stopPropagation()}
-                      className="h-6 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring [color-scheme:dark]"
-                    >
-                      <option value="">Unassigned</option>
-                      {users.map((u) => (
-                        <option key={u.email} value={u.email}>{u.email}</option>
-                      ))}
-                    </select>
+                  <div className="mt-3">
+                    <AssigneeSelector
+                      assignedTo={item.assignedTo}
+                      users={users}
+                      onAssign={(email) => saveAssignment(item.id, email)}
+                    />
                   </div>
 
                   <div className="flex items-end justify-between mt-3">
