@@ -470,6 +470,20 @@ export async function deleteUser(email: string): Promise<void> {
   await pool.query('DELETE FROM app_users WHERE email = $1', [email.toLowerCase()])
 }
 
+// ─── Incremental Feedback Save ────────────────────────────────────────────────
+
+/** Upsert a batch of new feedback items without loading all existing items. */
+export async function appendFeedbackItems(items: import('@/types').FeedbackItem[]): Promise<void> {
+  if (items.length === 0) return
+  await ensureSchema()
+  await batchUpsert(
+    'feedback_items',
+    'id',
+    items.map((item) => ({ id: item.id, data: item })),
+    'update'
+  )
+}
+
 // ─── Chat Context Items ───────────────────────────────────────────────────────
 
 export async function getRecentFeedbackItems(limit = 200): Promise<import('@/types').FeedbackItem[]> {

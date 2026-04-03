@@ -5,10 +5,12 @@ import {
   readFeedbackStore,
   readFrontRaw,
   readSlackRaw,
+  appendFeedbackItems,
   writeFeedbackStore,
   getTrainingExamples,
 } from '@/lib/storage'
 import { analyzeAllContent } from '@/lib/anthropic'
+import type { FeedbackItem } from '@/types'
 
 export const maxDuration = 300
 
@@ -37,6 +39,15 @@ export async function POST() {
       )
     }
 
+    let savedCount = 0
+
+    // Save each batch immediately as it completes — no work is lost if the run times out
+    async function onBatchComplete(batchItems: FeedbackItem[]) {
+      await appendFeedbackItems(batchItems)
+      savedCount += batchItems.length
+      console.log(`[Analyze] Saved batch: ${batchItems.length} items (${savedCount} total so far)`)
+    }
+
     const newItems = await analyzeAllContent(
       config.anthropic.apiKey,
       avoma,
@@ -52,19 +63,19 @@ export async function POST() {
         service: config.anthropic?.serviceInstructions,
         churn: config.anthropic?.churnInstructions,
       },
-      trainingExamples
+      trainingExamples,
+      onBatchComplete
     )
 
-    const updatedStore = {
+    // Update lastAnalyzedAt timestamp
+    await writeFeedbackStore({
       lastAnalyzedAt: new Date().toISOString(),
       items: [...feedbackStore.items, ...newItems],
-    }
-
-    await writeFeedbackStore(updatedStore)
+    })
 
     return NextResponse.json({
       newItems: newItems.length,
-      totalItems: updatedStore.items.length,
+      totalItems: feedbackStore.items.length + newItems.length,
     })
   } catch (err) {
     console.error('Analysis error:', err)

@@ -236,7 +236,8 @@ export async function analyzeAllContent(
   slack: SlackRawData | null,
   existingItems: FeedbackItem[],
   instructions?: { avoma?: string; front?: string; slack?: string; general?: string; product?: string; service?: string; churn?: string },
-  trainingExamples?: import('@/lib/storage').TrainingExample[]
+  trainingExamples?: import('@/lib/storage').TrainingExample[],
+  onBatchComplete?: (batchItems: FeedbackItem[]) => Promise<void>
 ): Promise<FeedbackItem[]> {
   const client = new Anthropic({ apiKey })
   const systemPrompt = buildSystemPrompt({
@@ -300,12 +301,15 @@ export async function analyzeAllContent(
 
   const newFeedbackItems: FeedbackItem[] = []
 
-  // Process in batches: 10 Avoma, 20 Front, handle Slack inline
+  // Process in batches and save each batch immediately if callback provided
   const BATCH_SIZE = 15
   for (let i = 0; i < allItems.length; i += BATCH_SIZE) {
     const batch = allItems.slice(i, i + BATCH_SIZE)
     const results = await analyzeChunk(client, batch, systemPrompt)
     newFeedbackItems.push(...results)
+    if (results.length > 0 && onBatchComplete) {
+      await onBatchComplete(results)
+    }
   }
 
   return newFeedbackItems
