@@ -1,10 +1,9 @@
 'use client'
 
 import { useState, Suspense } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 
 function LoginForm() {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const next = searchParams.get('next') ?? '/'
 
@@ -26,8 +25,10 @@ function LoginForm() {
       })
 
       if (res.ok) {
-        router.replace(next)
-        router.refresh()
+        // Hard redirect so the browser makes a fresh request with the session
+        // cookie already set — avoids Next.js App Router race conditions where
+        // router.replace + router.refresh can bounce back to the login page.
+        window.location.replace(next)
       } else {
         const data = await res.json()
         setError(data.error ?? 'Invalid credentials.')
