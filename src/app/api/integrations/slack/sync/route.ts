@@ -4,7 +4,7 @@ import { syncSlack } from '@/lib/slack'
 
 export const maxDuration = 300
 
-export async function POST() {
+export async function POST(req: Request) {
   try {
     const config = await readConfig()
     if (!config.slack?.botToken) {
@@ -19,15 +19,18 @@ export async function POST() {
       )
     }
 
+    const sinceParam = new URL(req.url).searchParams.get('since')
     const MAX_LOOKBACK_DAYS = 7
     const maxLookback = new Date()
     maxLookback.setDate(maxLookback.getDate() - MAX_LOOKBACK_DAYS)
     maxLookback.setHours(0, 0, 0, 0)
 
     const lastSyncedAt = config.slack.lastSyncedAt
-    const since = lastSyncedAt
-      ? new Date(Math.max(new Date(lastSyncedAt).getTime(), maxLookback.getTime()))
-      : maxLookback
+    const since = sinceParam
+      ? new Date(sinceParam)
+      : lastSyncedAt
+        ? new Date(Math.max(new Date(lastSyncedAt).getTime(), maxLookback.getTime()))
+        : maxLookback
 
     const data = await syncSlack(config.slack.botToken, channelIds, since)
     await writeSlackRaw(data)
