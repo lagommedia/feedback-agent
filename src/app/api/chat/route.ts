@@ -1,11 +1,14 @@
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { streamText } from 'ai'
-import { readConfig, getRecentFeedbackItems } from '@/lib/storage'
+import { readConfig, getRecentFeedbackItems, saveChatMessage, touchChatSession, updateChatSessionTitle } from '@/lib/storage'
 import { buildFeedbackContext } from '@/lib/anthropic'
+import { verifySessionToken, COOKIE_NAME } from '@/lib/auth'
+import { v4 as uuidv4 } from 'uuid'
+import type { NextRequest } from 'next/server'
 
 export const maxDuration = 120
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const config = await readConfig()
     if (!config.anthropic?.apiKey) {
@@ -15,7 +18,9 @@ export async function POST(req: Request) {
       )
     }
 
-    const { messages } = await req.json()
+    const body = await req.json()
+    const { messages, sessionId } = body
+
     const anthropic = createAnthropic({ apiKey: config.anthropic.apiKey })
 
     const recentItems = await getRecentFeedbackItems(200)
@@ -52,11 +57,31 @@ IMPORTANT: Always include "id", "source", and "rawSourceId" exactly as they appe
 Be concise and data-driven. Reference specific customers or examples when relevant. Today's date context: the most recent data is from 2026-03-27.`
       : `You are a product feedback analyst for Zeni. No feedback data has been analyzed yet. Tell the user to go to the Integrations page to connect their tools and sync data first.`
 
+    // Get the latest user message to save + use for auto-title
+    const lastUserMessage = [...messages].reverse().find((m: { role: string }) => m.role === 'user')
+
+    // Save user message to DB (fire-and-forget, don't block streaming)
+    if (sessionId && lastUserMessage) {
+      saveChatMessage(uuidv4(), sessionId, 'user', lastUserMessage.content).catch(console.error)
+      touchChatSession(sessionId).catch(console.error)
+
+      // Auto-title the session after the first user message (title is still "New Chat")
+      if (messages.filter((m: { role: string }) => m.role === 'user').length === 1) {
+        const title = lastUserMessage.content.slice(0, 60) + (lastUserMessage.content.length > 60 ? '…' : '')
+        updateChatSessionTitle(sessionId, title).catch(console.error)
+      }
+    }
 
     const result = streamText({
       model: anthropic('claude-sonnet-4-6'),
       system: systemPrompt,
       messages,
+      onFinish: async ({ text }) => {
+        if (sessionId && text) {
+          await saveChatMessage(uuidv4(), sessionId, 'assistant', text).catch(console.error)
+          await touchChatSession(sessionId).catch(console.error)
+        }
+      },
     })
 
     return result.toDataStreamResponse()

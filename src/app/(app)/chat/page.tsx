@@ -1,14 +1,26 @@
 'use client'
 
 import { useChat, type Message } from 'ai/react'
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useState, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Send, Loader2, Bot, User, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react'
+import {
+  Send,
+  Loader2,
+  Bot,
+  User,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  Plus,
+  Trash2,
+  MessageSquare,
+} from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import Link from 'next/link'
+import { v4 as uuidv4 } from 'uuid'
 import {
   BarChart,
   Bar,
@@ -19,12 +31,15 @@ import {
   Cell,
 } from 'recharts'
 
-const STARTER_QUESTIONS = [
-  'What are the most common issues this week?',
-  'Which customers are experiencing the most problems?',
-  'Show me all high-urgency churn risk items as a table.',
-  'What features are customers requesting most? Show me a chart.',
-]
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface ChatSession {
+  id: string
+  userEmail: string
+  title: string
+  createdAt: string
+  updatedAt: string
+}
 
 // ─── Source URL builder ────────────────────────────────────────────────────────
 
@@ -212,28 +227,172 @@ function CodeBlock({ className, children }: { className?: string; children?: Rea
   )
 }
 
+// ─── Session group helper ─────────────────────────────────────────────────────
+
+function groupSessions(sessions: ChatSession[]) {
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const yesterday = new Date(today.getTime() - 86400000)
+  const weekAgo = new Date(today.getTime() - 6 * 86400000)
+
+  const groups: { label: string; items: ChatSession[] }[] = [
+    { label: 'Today', items: [] },
+    { label: 'Yesterday', items: [] },
+    { label: 'This Week', items: [] },
+    { label: 'Older', items: [] },
+  ]
+
+  for (const s of sessions) {
+    const d = new Date(s.updatedAt)
+    if (d >= today) groups[0].items.push(s)
+    else if (d >= yesterday) groups[1].items.push(s)
+    else if (d >= weekAgo) groups[2].items.push(s)
+    else groups[3].items.push(s)
+  }
+
+  return groups.filter((g) => g.items.length > 0)
+}
+
+// ─── Starter questions ────────────────────────────────────────────────────────
+
+const STARTER_QUESTIONS = [
+  'What are the most common issues this week?',
+  'Which customers are experiencing the most problems?',
+  'Show me all high-urgency churn risk items as a table.',
+  'What features are customers requesting most? Show me a chart.',
+]
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function ChatPage() {
-  const { messages, input, handleInputChange, handleSubmit, isLoading, error } = useChat({
+  const [sessions, setSessions] = useState<ChatSession[]>([])
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [loadingSessions, setLoadingSessions] = useState(true)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  // Keep a ref so the useChat body getter always sees the latest sessionId
+  const sessionIdRef = useRef<string | null>(null)
+  sessionIdRef.current = activeSessionId
+
+  const { messages, input, handleInputChange, handleSubmit, isLoading, error, setMessages } = useChat({
     api: '/api/chat',
+    body: { sessionId: sessionIdRef.current },
+    id: activeSessionId ?? 'default',
   })
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  // ─── Load sessions on mount ──────────────────────────────────────────────────
+
+  const loadSessions = useCallback(async () => {
+    try {
+      const res = await fetch('/api/chat/sessions')
+      if (res.ok) {
+        const data = await res.json()
+        setSessions(data)
+      }
+    } finally {
+      setLoadingSessions(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadSessions()
+  }, [loadSessions])
+
+  // ─── Auto-scroll ─────────────────────────────────────────────────────────────
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // Refresh sessions list after each completed AI response (for title updates)
+  useEffect(() => {
+    if (!isLoading && activeSessionId) {
+      loadSessions()
+    }
+  }, [isLoading, activeSessionId, loadSessions])
+
+  // ─── New chat ─────────────────────────────────────────────────────────────────
+
+  async function handleNewChat() {
+    const res = await fetch('/api/chat/sessions', { method: 'POST' })
+    if (!res.ok) return
+    const session: ChatSession = await res.json()
+    setSessions((prev) => [session, ...prev])
+    setActiveSessionId(session.id)
+    setMessages([])
+  }
+
+  // ─── Select session ───────────────────────────────────────────────────────────
+
+  async function handleSelectSession(session: ChatSession) {
+    setActiveSessionId(session.id)
+    // Load messages for this session
+    const res = await fetch(`/api/chat/sessions/${session.id}`)
+    if (!res.ok) { setMessages([]); return }
+    const dbMessages = await res.json()
+    // Convert DB messages to useChat Message format
+    const chatMessages: Message[] = dbMessages.map((m: { id: string; role: string; content: string }) => ({
+      id: m.id,
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+    }))
+    setMessages(chatMessages)
+  }
+
+  // ─── Delete session ───────────────────────────────────────────────────────────
+
+  async function handleDeleteSession(e: React.MouseEvent, sessionId: string) {
+    e.stopPropagation()
+    setDeletingId(sessionId)
+    try {
+      await fetch(`/api/chat/sessions/${sessionId}`, { method: 'DELETE' })
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId))
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(null)
+        setMessages([])
+      }
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  // ─── Send message — ensure session exists first ───────────────────────────────
+
+  async function handleSend(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!input.trim() || isLoading) return
+
+    let sid = activeSessionId
+    if (!sid) {
+      // Create a session on first message
+      const res = await fetch('/api/chat/sessions', { method: 'POST' })
+      if (res.ok) {
+        const session: ChatSession = await res.json()
+        setSessions((prev) => [session, ...prev])
+        setActiveSessionId(session.id)
+        sessionIdRef.current = session.id
+        sid = session.id
+      }
+    }
+
+    handleSubmit(e)
+  }
+
+  // ─── Keyboard shortcut ────────────────────────────────────────────────────────
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       if (input.trim() && !isLoading) {
-        handleSubmit(e as unknown as React.FormEvent<HTMLFormElement>)
+        handleSend(e as unknown as React.FormEvent<HTMLFormElement>)
       }
     }
   }
+
+  // ─── Starter question click ───────────────────────────────────────────────────
 
   function handleStarterClick(question: string) {
     handleInputChange({ target: { value: question } } as React.ChangeEvent<HTMLTextAreaElement>)
@@ -242,145 +401,215 @@ export default function ChatPage() {
     }, 50)
   }
 
-  return (
-    <div className="flex flex-col h-screen">
-      {/* Header */}
-      <div className="border-b px-8 py-4 shrink-0">
-        <h1 className="text-xl font-bold">AI Chat</h1>
-        <p className="text-sm text-muted-foreground">
-          Ask questions about your product feedback data
-        </p>
-      </div>
+  const sessionGroups = groupSessions(sessions)
 
-      {/* Messages */}
-      <ScrollArea className="flex-1 px-8 py-6">
-        {messages.length === 0 ? (
-          <div className="max-w-2xl mx-auto">
-            <div className="text-center mb-8">
-              <Bot className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-              <p className="text-sm font-medium">Product Feedback Assistant</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Ask questions about your synced feedback data. If you haven&apos;t synced yet,{' '}
-                <Link href="/integrations" className="underline">
-                  go to Integrations
-                </Link>{' '}
-                first.
+  // ─── Render ──────────────────────────────────────────────────────────────────
+
+  return (
+    <div className="flex h-screen overflow-hidden">
+      {/* ── Sessions sidebar ── */}
+      <aside className="w-64 shrink-0 border-r flex flex-col bg-muted/20">
+        <div className="px-3 py-3 border-b shrink-0">
+          <button
+            onClick={handleNewChat}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            New Chat
+          </button>
+        </div>
+
+        <ScrollArea className="flex-1">
+          <div className="px-2 py-2">
+            {loadingSessions ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+              </div>
+            ) : sessions.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-6 px-2">
+                No chats yet. Start a new conversation!
               </p>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {STARTER_QUESTIONS.map((q) => (
-                <button
-                  key={q}
-                  onClick={() => handleStarterClick(q)}
-                  className="text-left p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors text-sm"
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="max-w-2xl mx-auto space-y-6">
-            {messages.map((message: Message) => (
-              <div
-                key={message.id}
-                className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                {message.role === 'assistant' && (
-                  <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center shrink-0 mt-1">
-                    <Bot className="w-4 h-4 text-primary-foreground" />
-                  </div>
-                )}
-                <div
-                  className={`rounded-2xl px-4 py-3 text-sm ${
-                    message.role === 'user'
-                      ? 'bg-primary text-primary-foreground max-w-[80%]'
-                      : 'bg-muted w-full max-w-full'
-                  }`}
-                >
-                  {message.role === 'assistant' ? (
-                    <div className="prose prose-sm max-w-none dark:prose-invert prose-table:text-xs prose-td:py-1.5 prose-th:py-1.5 prose-thead:border-b prose-thead:border-border prose-tr:border-b prose-tr:border-border/50">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          code: ({ className, children }) => (
-                            <CodeBlock className={className}>{children}</CodeBlock>
-                          ),
-                          pre: ({ children }) => <>{children}</>,
-                          table: ({ children }) => (
-                            <div className="overflow-x-auto my-3">
-                              <table className="w-full text-xs border-collapse">{children}</table>
-                            </div>
-                          ),
-                          th: ({ children }) => (
-                            <th className="text-left px-3 py-2 font-semibold text-muted-foreground border-b border-border bg-muted/40">
-                              {children}
-                            </th>
-                          ),
-                          td: ({ children }) => (
-                            <td className="px-3 py-2 border-b border-border/40">{children}</td>
-                          ),
-                          a: ({ href, children }) => (
-                            <a href={href} target="_blank" rel="noopener noreferrer" className="underline">
-                              {children}
-                            </a>
-                          ),
-                        }}
+            ) : (
+              sessionGroups.map((group) => (
+                <div key={group.label} className="mb-3">
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1">
+                    {group.label}
+                  </p>
+                  {group.items.map((session) => (
+                    <button
+                      key={session.id}
+                      onClick={() => handleSelectSession(session)}
+                      className={`w-full group flex items-center gap-2 px-2 py-2 rounded-lg text-left transition-colors text-sm ${
+                        activeSessionId === session.id
+                          ? 'bg-muted text-foreground'
+                          : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                      }`}
+                    >
+                      <MessageSquare className="w-3.5 h-3.5 shrink-0 opacity-60" />
+                      <span className="flex-1 truncate text-xs leading-snug">{session.title}</span>
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => handleDeleteSession(e, session.id)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleDeleteSession(e as unknown as React.MouseEvent, session.id) }}
+                        className="shrink-0 opacity-0 group-hover:opacity-100 p-0.5 rounded hover:text-destructive transition-all"
+                        title="Delete conversation"
                       >
-                        {message.content}
-                      </ReactMarkdown>
+                        {deletingId === session.id ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3 h-3" />
+                        )}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ))
+            )}
+          </div>
+        </ScrollArea>
+      </aside>
+
+      {/* ── Main chat area ── */}
+      <div className="flex flex-col flex-1 min-w-0">
+        {/* Header */}
+        <div className="border-b px-8 py-4 shrink-0">
+          <h1 className="text-xl font-bold">AI Chat</h1>
+          <p className="text-sm text-muted-foreground">
+            Ask questions about your product feedback data
+          </p>
+        </div>
+
+        {/* Messages */}
+        <ScrollArea className="flex-1 px-8 py-6">
+          {messages.length === 0 ? (
+            <div className="max-w-2xl mx-auto">
+              <div className="text-center mb-8">
+                <Bot className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                <p className="text-sm font-medium">Product Feedback Assistant</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Ask questions about your synced feedback data. If you haven&apos;t synced yet,{' '}
+                  <Link href="/integrations" className="underline">
+                    go to Integrations
+                  </Link>{' '}
+                  first.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {STARTER_QUESTIONS.map((q) => (
+                  <button
+                    key={q}
+                    onClick={() => handleStarterClick(q)}
+                    className="text-left p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors text-sm"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="max-w-2xl mx-auto space-y-6">
+              {messages.map((message: Message) => (
+                <div
+                  key={message.id}
+                  className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                >
+                  {message.role === 'assistant' && (
+                    <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center shrink-0 mt-1">
+                      <Bot className="w-4 h-4 text-primary-foreground" />
                     </div>
-                  ) : (
-                    <p>{message.content}</p>
+                  )}
+                  <div
+                    className={`rounded-2xl px-4 py-3 text-sm ${
+                      message.role === 'user'
+                        ? 'bg-primary text-primary-foreground max-w-[80%]'
+                        : 'bg-muted w-full max-w-full'
+                    }`}
+                  >
+                    {message.role === 'assistant' ? (
+                      <div className="prose prose-sm max-w-none dark:prose-invert prose-table:text-xs prose-td:py-1.5 prose-th:py-1.5 prose-thead:border-b prose-thead:border-border prose-tr:border-b prose-tr:border-border/50">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            code: ({ className, children }) => (
+                              <CodeBlock className={className}>{children}</CodeBlock>
+                            ),
+                            pre: ({ children }) => <>{children}</>,
+                            table: ({ children }) => (
+                              <div className="overflow-x-auto my-3">
+                                <table className="w-full text-xs border-collapse">{children}</table>
+                              </div>
+                            ),
+                            th: ({ children }) => (
+                              <th className="text-left px-3 py-2 font-semibold text-muted-foreground border-b border-border bg-muted/40">
+                                {children}
+                              </th>
+                            ),
+                            td: ({ children }) => (
+                              <td className="px-3 py-2 border-b border-border/40">{children}</td>
+                            ),
+                            a: ({ href, children }) => (
+                              <a href={href} target="_blank" rel="noopener noreferrer" className="underline">
+                                {children}
+                              </a>
+                            ),
+                          }}
+                        >
+                          {message.content}
+                        </ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p>{message.content}</p>
+                    )}
+                  </div>
+                  {message.role === 'user' && (
+                    <div className="w-7 h-7 rounded-full bg-secondary flex items-center justify-center shrink-0 mt-1">
+                      <User className="w-4 h-4" />
+                    </div>
                   )}
                 </div>
-                {message.role === 'user' && (
-                  <div className="w-7 h-7 rounded-full bg-secondary flex items-center justify-center shrink-0 mt-1">
-                    <User className="w-4 h-4" />
+              ))}
+              {isLoading && (
+                <div className="flex gap-3">
+                  <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center shrink-0">
+                    <Bot className="w-4 h-4 text-primary-foreground" />
                   </div>
-                )}
-              </div>
-            ))}
-            {isLoading && (
-              <div className="flex gap-3">
-                <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center shrink-0">
-                  <Bot className="w-4 h-4 text-primary-foreground" />
+                  <div className="rounded-2xl px-4 py-2.5 bg-muted">
+                    <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                  </div>
                 </div>
-                <div className="rounded-2xl px-4 py-2.5 bg-muted">
-                  <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+              )}
+              {error && (
+                <div className="text-sm text-destructive text-center p-3 bg-destructive/10 rounded-lg">
+                  {error.message}
                 </div>
-              </div>
-            )}
-            {error && (
-              <div className="text-sm text-destructive text-center p-3 bg-destructive/10 rounded-lg">
-                {error.message}
-              </div>
-            )}
-            <div ref={bottomRef} />
-          </div>
-        )}
-      </ScrollArea>
+              )}
+              <div ref={bottomRef} />
+            </div>
+          )}
+        </ScrollArea>
 
-      {/* Input */}
-      <div className="border-t px-8 py-4 shrink-0">
-        <form onSubmit={handleSubmit} className="max-w-2xl mx-auto flex gap-2">
-          <Textarea
-            ref={textareaRef}
-            value={input}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask about your feedback data… (Enter to send, Shift+Enter for new line)"
-            className="resize-none min-h-[44px] max-h-[120px]"
-            rows={1}
-          />
-          <Button type="submit" disabled={isLoading || !input.trim()} size="icon" className="shrink-0 h-11 w-11">
-            {isLoading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Send className="w-4 h-4" />
-            )}
-          </Button>
-        </form>
+        {/* Input */}
+        <div className="border-t px-8 py-4 shrink-0">
+          <form onSubmit={handleSend} className="max-w-2xl mx-auto flex gap-2">
+            <Textarea
+              ref={textareaRef}
+              value={input}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask about your feedback data… (Enter to send, Shift+Enter for new line)"
+              className="resize-none min-h-[44px] max-h-[120px]"
+              rows={1}
+            />
+            <Button type="submit" disabled={isLoading || !input.trim()} size="icon" className="shrink-0 h-11 w-11">
+              {isLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
+            </Button>
+          </form>
+        </div>
       </div>
     </div>
   )

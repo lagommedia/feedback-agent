@@ -88,6 +88,20 @@ async function ensureSchema(): Promise<void> {
       feedback_description TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+      id TEXT PRIMARY KEY,
+      user_email TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT 'New Chat',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
   `)
   _schemaReady = true
 }
@@ -510,6 +524,107 @@ export async function getDistinctCustomers(): Promise<string[]> {
     ORDER BY customer
   `)
   return res.rows.map((r: { customer: string }) => r.customer)
+}
+
+// ─── Chat Sessions ────────────────────────────────────────────────────────────
+
+export interface ChatSession {
+  id: string
+  userEmail: string
+  title: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ChatMessage {
+  id: string
+  sessionId: string
+  role: 'user' | 'assistant'
+  content: string
+  createdAt: string
+}
+
+export async function createChatSession(id: string, userEmail: string, title = 'New Chat'): Promise<ChatSession> {
+  await ensureSchema()
+  const pool = getPool()
+  const res = await pool.query(
+    `INSERT INTO chat_sessions (id, user_email, title, created_at, updated_at)
+     VALUES ($1, $2, $3, NOW(), NOW())
+     RETURNING *`,
+    [id, userEmail.toLowerCase(), title]
+  )
+  const r = res.rows[0]
+  return { id: r.id, userEmail: r.user_email, title: r.title, createdAt: r.created_at, updatedAt: r.updated_at }
+}
+
+export async function getChatSessions(userEmail: string): Promise<ChatSession[]> {
+  await ensureSchema()
+  const pool = getPool()
+  const res = await pool.query(
+    `SELECT * FROM chat_sessions WHERE user_email = $1 ORDER BY updated_at DESC`,
+    [userEmail.toLowerCase()]
+  )
+  return res.rows.map((r) => ({
+    id: r.id,
+    userEmail: r.user_email,
+    title: r.title,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }))
+}
+
+export async function updateChatSessionTitle(sessionId: string, title: string): Promise<void> {
+  await ensureSchema()
+  const pool = getPool()
+  await pool.query(
+    `UPDATE chat_sessions SET title = $1, updated_at = NOW() WHERE id = $2`,
+    [title, sessionId]
+  )
+}
+
+export async function touchChatSession(sessionId: string): Promise<void> {
+  await ensureSchema()
+  const pool = getPool()
+  await pool.query(`UPDATE chat_sessions SET updated_at = NOW() WHERE id = $1`, [sessionId])
+}
+
+export async function deleteChatSession(sessionId: string): Promise<void> {
+  await ensureSchema()
+  const pool = getPool()
+  await pool.query(`DELETE FROM chat_messages WHERE session_id = $1`, [sessionId])
+  await pool.query(`DELETE FROM chat_sessions WHERE id = $1`, [sessionId])
+}
+
+export async function saveChatMessage(
+  id: string,
+  sessionId: string,
+  role: 'user' | 'assistant',
+  content: string
+): Promise<void> {
+  await ensureSchema()
+  const pool = getPool()
+  await pool.query(
+    `INSERT INTO chat_messages (id, session_id, role, content, created_at)
+     VALUES ($1, $2, $3, $4, NOW())
+     ON CONFLICT (id) DO NOTHING`,
+    [id, sessionId, role, content]
+  )
+}
+
+export async function getChatMessages(sessionId: string): Promise<ChatMessage[]> {
+  await ensureSchema()
+  const pool = getPool()
+  const res = await pool.query(
+    `SELECT * FROM chat_messages WHERE session_id = $1 ORDER BY created_at ASC`,
+    [sessionId]
+  )
+  return res.rows.map((r) => ({
+    id: r.id,
+    sessionId: r.session_id,
+    role: r.role as 'user' | 'assistant',
+    content: r.content,
+    createdAt: r.created_at,
+  }))
 }
 
 // ─── Training Examples ─────────────────────────────────────────────────────────
