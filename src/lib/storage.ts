@@ -395,14 +395,16 @@ export async function readFeedbackStore(): Promise<FeedbackStore> {
   }
 }
 
-export async function writeFeedbackStore(store: FeedbackStore): Promise<void> {
+export async function writeFeedbackStore(store: { lastAnalyzedAt: string; items?: import('@/types').FeedbackItem[] }): Promise<void> {
   await ensureSchema()
-  await batchUpsert(
-    'feedback_items',
-    'id',
-    store.items.map((item) => ({ id: item.id, data: item })),
-    'update'
-  )
+  if (store.items && store.items.length > 0) {
+    await batchUpsert(
+      'feedback_items',
+      'id',
+      store.items.map((item) => ({ id: item.id, data: item })),
+      'update'
+    )
+  }
   const pool = getPool()
   await pool.query(
     "INSERT INTO app_meta (key, value) VALUES ('last_analyzed_at', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
@@ -524,6 +526,82 @@ export async function getDistinctCustomers(): Promise<string[]> {
     ORDER BY customer
   `)
   return res.rows.map((r: { customer: string }) => r.customer)
+}
+
+// ─── Unanalyzed Content Fetchers ──────────────────────────────────────────────
+
+/**
+ * Returns Avoma transcripts that have NOT yet produced any feedback item.
+ * Uses a NOT EXISTS subquery so we never load the full 18k-meeting history.
+ */
+export async function getUnanalyzedAvomaTranscripts(limit = 150): Promise<import('@/types').AvomaRawTranscript[]> {
+  await ensureSchema()
+  const pool = getPool()
+  const res = await pool.query(
+    `SELECT at.data
+     FROM avoma_transcripts at
+     WHERE NOT EXISTS (
+       SELECT 1 FROM feedback_items fi
+       WHERE fi.data->>'rawSourceId' = at.meeting_uuid
+     )
+     ORDER BY at.meeting_uuid
+     LIMIT $1`,
+    [limit]
+  )
+  return res.rows.map((r) => r.data)
+}
+
+/**
+ * Returns Front conversations (with their messages) that have NOT yet produced
+ * any feedback item. Messages are fetched in a single JOIN to avoid N+1 queries.
+ */
+export async function getUnanalyzedFrontConversations(limit = 75): Promise<{
+  conversations: import('@/types').FrontRawConversation[]
+  messages: import('@/types').FrontRawMessage[]
+}> {
+  await ensureSchema()
+  const pool = getPool()
+  const convRes = await pool.query(
+    `SELECT fc.data
+     FROM front_conversations fc
+     WHERE NOT EXISTS (
+       SELECT 1 FROM feedback_items fi
+       WHERE fi.data->>'rawSourceId' = fc.id
+     )
+     ORDER BY (fc.data->>'created_at')::float ASC
+     LIMIT $1`,
+    [limit]
+  )
+  if (convRes.rows.length === 0) return { conversations: [], messages: [] }
+
+  const convIds = convRes.rows.map((r) => r.data.id as string)
+  const msgRes = await pool.query(
+    `SELECT data FROM front_messages
+     WHERE data->>'conversationId' = ANY($1::text[])`,
+    [convIds]
+  )
+  return {
+    conversations: convRes.rows.map((r) => r.data),
+    messages: msgRes.rows.map((r) => r.data),
+  }
+}
+
+/**
+ * Returns the count of remaining unanalyzed items (for progress reporting).
+ */
+export async function getUnanalyzedCounts(): Promise<{ avoma: number; front: number }> {
+  await ensureSchema()
+  const pool = getPool()
+  const [avoma, front] = await Promise.all([
+    pool.query(`SELECT COUNT(*) FROM avoma_transcripts at
+      WHERE NOT EXISTS (SELECT 1 FROM feedback_items fi WHERE fi.data->>'rawSourceId' = at.meeting_uuid)`),
+    pool.query(`SELECT COUNT(*) FROM front_conversations fc
+      WHERE NOT EXISTS (SELECT 1 FROM feedback_items fi WHERE fi.data->>'rawSourceId' = fc.id)`),
+  ])
+  return {
+    avoma: parseInt(avoma.rows[0].count),
+    front: parseInt(front.rows[0].count),
+  }
 }
 
 // ─── Chat Sessions ────────────────────────────────────────────────────────────
