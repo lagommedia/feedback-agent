@@ -205,7 +205,7 @@ async function analyzeChunk(
   try {
     response = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
+      max_tokens: 8192,
       system: systemPrompt,
       messages: [{ role: 'user', content: userContent }],
     })
@@ -315,8 +315,9 @@ export async function analyzeAllContent(
 
   const newFeedbackItems: FeedbackItem[] = []
 
-  // Process in batches and save each batch immediately if callback provided
-  const BATCH_SIZE = 15
+  // Process in batches of 5 — smaller batches prevent output token truncation
+  // (15 meetings × 3+ feedback items × ~300 tokens each would exceed 4096 max_tokens)
+  const BATCH_SIZE = 5
   for (let i = 0; i < allItems.length; i += BATCH_SIZE) {
     const batch = allItems.slice(i, i + BATCH_SIZE)
     const results = await analyzeChunk(client, batch, systemPrompt)
