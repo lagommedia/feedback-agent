@@ -4,7 +4,6 @@ import { useChat, type Message } from 'ai/react'
 import { useRef, useEffect, useState, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Send,
   Loader2,
@@ -280,8 +279,9 @@ export default function ChatPage() {
     id: activeSessionId ?? 'default',
   })
 
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const userScrolledUpRef = useRef(false)
 
   // ─── Load sessions on mount ──────────────────────────────────────────────────
 
@@ -303,9 +303,34 @@ export default function ChatPage() {
 
   // ─── Auto-scroll ─────────────────────────────────────────────────────────────
 
+  // Track whether the user has scrolled up manually
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = messagesContainerRef.current
+    if (!el) return
+    function onScroll() {
+      const el = messagesContainerRef.current
+      if (!el) return
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+      userScrolledUpRef.current = distFromBottom > 80
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [])
+
+  // Scroll to bottom on new messages, but only if user hasn't scrolled up
+  useEffect(() => {
+    if (userScrolledUpRef.current) return
+    const el = messagesContainerRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
   }, [messages])
+
+  // Always scroll to bottom when a new session is selected or chat is cleared
+  function scrollToBottom() {
+    userScrolledUpRef.current = false
+    const el = messagesContainerRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }
 
   // Refresh sessions list after each completed AI response (for title updates)
   useEffect(() => {
@@ -340,6 +365,7 @@ export default function ChatPage() {
       content: m.content,
     }))
     setMessages(chatMessages)
+    setTimeout(scrollToBottom, 50)
   }
 
   // ─── Delete session ───────────────────────────────────────────────────────────
@@ -353,6 +379,7 @@ export default function ChatPage() {
       if (activeSessionId === sessionId) {
         setActiveSessionId(null)
         setMessages([])
+        scrollToBottom()
       }
     } finally {
       setDeletingId(null)
@@ -481,7 +508,7 @@ export default function ChatPage() {
         </div>
 
         {/* Messages */}
-        <ScrollArea className="flex-1 px-8 py-6">
+        <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-8 py-6">
           {messages.length === 0 ? (
             <div className="max-w-2xl mx-auto">
               <div className="text-center mb-8">
@@ -584,10 +611,9 @@ export default function ChatPage() {
                   {error.message}
                 </div>
               )}
-              <div ref={bottomRef} />
             </div>
           )}
-        </ScrollArea>
+        </div>
 
         {/* Input */}
         <div className="border-t px-8 py-4 shrink-0">
