@@ -8,6 +8,7 @@ import {
   getUnanalyzedAvomaTranscripts,
   getUnanalyzedFrontConversations,
   getUnanalyzedCounts,
+  markSourcesAnalyzed,
 } from '@/lib/storage'
 import { analyzeAllContent } from '@/lib/anthropic'
 import type { FeedbackItem } from '@/types'
@@ -81,7 +82,11 @@ export async function POST() {
         churn: config.anthropic?.churnInstructions,
       },
       trainingExamples,
-      onBatchComplete
+      onBatchComplete,
+      async (sourceIds) => {
+        await markSourcesAnalyzed(sourceIds)
+        console.log(`[Analyze] Marked ${sourceIds.length} sources as analyzed`)
+      }
     )
 
     console.log(`[Analyze] Complete. ${newItems.length} new items extracted, ${savedCount} saved.`)

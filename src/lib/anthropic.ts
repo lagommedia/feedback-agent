@@ -251,7 +251,8 @@ export async function analyzeAllContent(
   existingItems: FeedbackItem[],
   instructions?: { avoma?: string; front?: string; slack?: string; general?: string; product?: string; service?: string; churn?: string },
   trainingExamples?: import('@/lib/storage').TrainingExample[],
-  onBatchComplete?: (batchItems: FeedbackItem[]) => Promise<void>
+  onBatchComplete?: (batchItems: FeedbackItem[]) => Promise<void>,
+  onBatchAnalyzed?: (sourceIds: string[]) => Promise<void>
 ): Promise<FeedbackItem[]> {
   const client = new Anthropic({ apiKey })
   const systemPrompt = buildSystemPrompt({
@@ -322,8 +323,14 @@ export async function analyzeAllContent(
     const batch = allItems.slice(i, i + BATCH_SIZE)
     const results = await analyzeChunk(client, batch, systemPrompt)
     newFeedbackItems.push(...results)
+    // Always save feedback items found
     if (results.length > 0 && onBatchComplete) {
       await onBatchComplete(results)
+    }
+    // Always mark ALL source IDs in this batch as analyzed, even if no feedback found.
+    // This prevents the same no-feedback meetings from being re-fetched on every run.
+    if (onBatchAnalyzed) {
+      await onBatchAnalyzed(batch.map((item) => item.id))
     }
   }
 

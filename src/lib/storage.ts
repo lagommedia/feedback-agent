@@ -88,6 +88,10 @@ async function ensureSchema(): Promise<void> {
       feedback_description TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS analyzed_sources (
+      source_id TEXT PRIMARY KEY,
+      analyzed_at TIMESTAMPTZ DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS chat_sessions (
       id TEXT PRIMARY KEY,
       user_email TEXT NOT NULL,
@@ -534,6 +538,18 @@ export async function getDistinctCustomers(): Promise<string[]> {
  * Returns Avoma transcripts that have NOT yet produced any feedback item.
  * Uses a NOT EXISTS subquery so we never load the full 18k-meeting history.
  */
+/** Mark a batch of source IDs as analyzed (even if they produced no feedback items). */
+export async function markSourcesAnalyzed(sourceIds: string[]): Promise<void> {
+  if (sourceIds.length === 0) return
+  await ensureSchema()
+  const pool = getPool()
+  const values = sourceIds.map((_, i) => `($${i + 1})`).join(', ')
+  await pool.query(
+    `INSERT INTO analyzed_sources (source_id) VALUES ${values} ON CONFLICT (source_id) DO NOTHING`,
+    sourceIds
+  )
+}
+
 export async function getUnanalyzedAvomaTranscripts(limit = 100): Promise<import('@/types').AvomaRawTranscript[]> {
   await ensureSchema()
   const pool = getPool()
@@ -544,9 +560,11 @@ export async function getUnanalyzedAvomaTranscripts(limit = 100): Promise<import
        SELECT 1 FROM feedback_items fi
        WHERE fi.data->>'rawSourceId' = at.meeting_uuid
      )
-       -- Skip outbound sales calls (phone number pattern in title)
+       AND NOT EXISTS (
+         SELECT 1 FROM analyzed_sources ans
+         WHERE ans.source_id = at.meeting_uuid
+       )
        AND NOT (at.data->>'meetingTitle' ~* 'Call with .+ \\(\\+?1?[0-9]{10,11}\\)')
-       -- Require at least 8 segments — filters out voicemails and tiny calls
        AND jsonb_array_length(at.data->'segments') >= 8
      ORDER BY (at.data->>'date') DESC
      LIMIT $1`,
@@ -555,10 +573,6 @@ export async function getUnanalyzedAvomaTranscripts(limit = 100): Promise<import
   return res.rows.map((r) => r.data)
 }
 
-/**
- * Returns Front conversations (with their messages) that have NOT yet produced
- * any feedback item. Messages are fetched in a single JOIN to avoid N+1 queries.
- */
 export async function getUnanalyzedFrontConversations(limit = 75): Promise<{
   conversations: import('@/types').FrontRawConversation[]
   messages: import('@/types').FrontRawMessage[]
@@ -572,6 +586,10 @@ export async function getUnanalyzedFrontConversations(limit = 75): Promise<{
        SELECT 1 FROM feedback_items fi
        WHERE fi.data->>'rawSourceId' = fc.id
      )
+       AND NOT EXISTS (
+         SELECT 1 FROM analyzed_sources ans
+         WHERE ans.source_id = fc.id
+       )
      ORDER BY (fc.data->>'created_at')::float ASC
      LIMIT $1`,
     [limit]
@@ -590,19 +608,18 @@ export async function getUnanalyzedFrontConversations(limit = 75): Promise<{
   }
 }
 
-/**
- * Returns the count of remaining unanalyzed items (for progress reporting).
- */
 export async function getUnanalyzedCounts(): Promise<{ avoma: number; front: number }> {
   await ensureSchema()
   const pool = getPool()
   const [avoma, front] = await Promise.all([
     pool.query(`SELECT COUNT(*) FROM avoma_transcripts at
       WHERE NOT EXISTS (SELECT 1 FROM feedback_items fi WHERE fi.data->>'rawSourceId' = at.meeting_uuid)
+        AND NOT EXISTS (SELECT 1 FROM analyzed_sources ans WHERE ans.source_id = at.meeting_uuid)
         AND NOT (at.data->>'meetingTitle' ~* 'Call with .+ \\(\\+?1?[0-9]{10,11}\\)')
         AND jsonb_array_length(at.data->'segments') >= 8`),
     pool.query(`SELECT COUNT(*) FROM front_conversations fc
-      WHERE NOT EXISTS (SELECT 1 FROM feedback_items fi WHERE fi.data->>'rawSourceId' = fc.id)`),
+      WHERE NOT EXISTS (SELECT 1 FROM feedback_items fi WHERE fi.data->>'rawSourceId' = fc.id)
+        AND NOT EXISTS (SELECT 1 FROM analyzed_sources ans WHERE ans.source_id = fc.id)`),
   ])
   return {
     avoma: parseInt(avoma.rows[0].count),
