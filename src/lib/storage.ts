@@ -534,7 +534,7 @@ export async function getDistinctCustomers(): Promise<string[]> {
  * Returns Avoma transcripts that have NOT yet produced any feedback item.
  * Uses a NOT EXISTS subquery so we never load the full 18k-meeting history.
  */
-export async function getUnanalyzedAvomaTranscripts(limit = 150): Promise<import('@/types').AvomaRawTranscript[]> {
+export async function getUnanalyzedAvomaTranscripts(limit = 100): Promise<import('@/types').AvomaRawTranscript[]> {
   await ensureSchema()
   const pool = getPool()
   const res = await pool.query(
@@ -544,7 +544,8 @@ export async function getUnanalyzedAvomaTranscripts(limit = 150): Promise<import
        SELECT 1 FROM feedback_items fi
        WHERE fi.data->>'rawSourceId' = at.meeting_uuid
      )
-     ORDER BY at.meeting_uuid
+       AND jsonb_array_length(at.data->'segments') > 1
+     ORDER BY (at.data->>'date') DESC
      LIMIT $1`,
     [limit]
   )

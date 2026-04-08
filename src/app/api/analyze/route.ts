@@ -4,7 +4,6 @@ import {
   readSlackRaw,
   appendFeedbackItems,
   writeFeedbackStore,
-  readFeedbackStore,
   getTrainingExamples,
   getUnanalyzedAvomaTranscripts,
   getUnanalyzedFrontConversations,
@@ -30,20 +29,21 @@ export async function POST() {
     const hasSlack = !!(await readSlackRaw())
 
     if (remaining.avoma === 0 && remaining.front === 0 && !hasSlack) {
-      // Everything is already analyzed — just update the timestamp
-      await writeFeedbackStore({ lastAnalyzedAt: new Date().toISOString(), items: [] })
-      return NextResponse.json({ newItems: 0, totalItems: 0, remaining: { avoma: 0, front: 0 } })
+      await writeFeedbackStore({ lastAnalyzedAt: new Date().toISOString() })
+      return NextResponse.json({ newItems: 0, remaining: { avoma: 0, front: 0 } })
     }
 
-    // Fetch ONLY unanalyzed items — never loads full history into memory
+    // Fetch ONLY unanalyzed items — smaller batches to stay well within Vercel's 5-min limit
+    // Avoma transcripts: limit 50, front conversations: limit 30
     const [avomaTranscripts, frontData, slack, trainingExamples] = await Promise.all([
-      getUnanalyzedAvomaTranscripts(150),
-      getUnanalyzedFrontConversations(75),
+      getUnanalyzedAvomaTranscripts(50),
+      getUnanalyzedFrontConversations(30),
       readSlackRaw(),
       getTrainingExamples(),
     ])
 
-    // Build synthetic raw data objects (just the unanalyzed slices)
+    console.log(`[Analyze] Fetched ${avomaTranscripts.length} Avoma transcripts, ${frontData.conversations.length} Front convos to process`)
+
     const avomaSlice = avomaTranscripts.length > 0
       ? { fetchedAt: new Date().toISOString(), meetings: [], transcripts: avomaTranscripts }
       : null
@@ -53,8 +53,8 @@ export async function POST() {
       : null
 
     if (!avomaSlice && !frontSlice && !slack) {
-      await writeFeedbackStore({ lastAnalyzedAt: new Date().toISOString(), items: [] })
-      return NextResponse.json({ newItems: 0, totalItems: 0, remaining: { avoma: 0, front: 0 } })
+      await writeFeedbackStore({ lastAnalyzedAt: new Date().toISOString() })
+      return NextResponse.json({ newItems: 0, remaining: { avoma: 0, front: 0 } })
     }
 
     let savedCount = 0
@@ -65,13 +65,12 @@ export async function POST() {
       console.log(`[Analyze] Saved batch: ${batchItems.length} items (${savedCount} total so far)`)
     }
 
-    // Pass existingItems: [] — the DB queries already filtered out analyzed content
     const newItems = await analyzeAllContent(
       config.anthropic.apiKey,
       avomaSlice,
       frontSlice,
       slack,
-      [], // already filtered at DB level — no need for in-memory dedup
+      [], // DB queries already filtered unanalyzed — no in-memory dedup needed
       {
         avoma: config.avoma?.instructions,
         front: config.front?.instructions,
@@ -85,18 +84,20 @@ export async function POST() {
       onBatchComplete
     )
 
-    // Update lastAnalyzedAt
-    await writeFeedbackStore({ lastAnalyzedAt: new Date().toISOString(), items: [] })
+    console.log(`[Analyze] Complete. ${newItems.length} new items extracted, ${savedCount} saved.`)
 
-    // Check how much is still left for the caller to decide if another run is needed
+    // Update lastAnalyzedAt
+    await writeFeedbackStore({ lastAnalyzedAt: new Date().toISOString() })
+
     const stillRemaining = await getUnanalyzedCounts()
 
     return NextResponse.json({
       newItems: newItems.length,
+      fetched: { avoma: avomaTranscripts.length, front: frontData.conversations.length },
       remaining: stillRemaining,
     })
   } catch (err) {
-    console.error('Analysis error:', err)
+    console.error('[Analyze] Fatal error:', err)
     return NextResponse.json({ error: String(err) }, { status: 500 })
   }
 }

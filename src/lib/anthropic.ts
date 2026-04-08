@@ -181,6 +181,9 @@ function slackMessagesToContent(
   }
 }
 
+// Max characters of content to send per item — prevents token limit errors on huge transcripts
+const MAX_CONTENT_CHARS = 8000
+
 async function analyzeChunk(
   client: Anthropic,
   items: RawContentItem[],
@@ -190,16 +193,26 @@ async function analyzeChunk(
     .map((item, i) => {
       const header = `--- Item ${i + 1} (ID: ${item.id}, Source: ${item.source}, Date: ${item.date}) ---`
       const instructions = item.instructions ? `[Instructions for this source: ${item.instructions}]` : ''
-      return [header, instructions, item.content].filter(Boolean).join('\n')
+      // Truncate very long content to avoid token limit errors
+      const content = item.content.length > MAX_CONTENT_CHARS
+        ? item.content.slice(0, MAX_CONTENT_CHARS) + '\n[...truncated]'
+        : item.content
+      return [header, instructions, content].filter(Boolean).join('\n')
     })
     .join('\n\n')
 
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 4096,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: userContent }],
-  })
+  let response
+  try {
+    response = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userContent }],
+    })
+  } catch (apiErr) {
+    // Surface API errors (credits, rate limits, token limits) rather than silently returning []
+    throw apiErr
+  }
 
   const text = response.content[0].type === 'text' ? response.content[0].text : '[]'
 
@@ -225,6 +238,7 @@ async function analyzeChunk(
       analyzedAt: new Date().toISOString(),
     }))
   } catch {
+    console.error('[analyzeChunk] JSON parse failed. Raw response:', text.slice(0, 500))
     return []
   }
 }
