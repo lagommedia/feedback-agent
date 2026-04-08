@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { readConfig, mergeFrontRaw, writeConfig } from '@/lib/storage'
+import { readConfig, mergeFrontRaw, writeConfig, unmarkAnalyzedSources } from '@/lib/storage'
 import { syncFront } from '@/lib/front'
 
 export const maxDuration = 300
@@ -29,6 +29,12 @@ export async function POST(req: Request) {
     const data = await syncFront(config.front.bearerToken, since, internalEmails, inboxIds)
     const merged = await mergeFrontRaw(data)
 
+    // Clear re-synced conversations from analyzed_sources (if they have no feedback yet)
+    // so they get re-analyzed with their latest messages
+    const syncedIds = merged.conversations.map((c) => c.id)
+    const cleared = await unmarkAnalyzedSources(syncedIds)
+    console.log(`[Front sync] Cleared ${cleared} conversations from analyzed_sources for re-analysis`)
+
     const updatedConfig = {
       ...config,
       front: { ...config.front, lastSyncedAt: new Date().toISOString() },
@@ -39,6 +45,7 @@ export async function POST(req: Request) {
       source: 'front',
       status: 'success',
       count: merged.conversations.length,
+      clearedForReanalysis: cleared,
     })
   } catch (err) {
     console.error('Front sync error:', err)

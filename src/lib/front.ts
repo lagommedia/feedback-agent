@@ -120,8 +120,10 @@ async function fetchConversationPage(
     const batch: FrontRawConversation[] = data._results ?? []
     totalFetched += batch.length
 
-    // Results are newest-first — stop as soon as we hit conversations older than `since`
-    const withinWindow = batch.filter(c => (c.created_at ?? 0) >= sinceTs)
+    // Results are newest-first — stop as soon as we hit conversations with no activity since `since`
+    // Use updated_at (last reply) not created_at (thread opened) so threads started before the
+    // window but replied to within it are included
+    const withinWindow = batch.filter(c => (c.updated_at ?? c.created_at ?? 0) >= sinceTs)
     const customerBatch = withinWindow.filter(c => isCustomerConversation(c, internalEmails))
     conversations.push(...customerBatch)
 

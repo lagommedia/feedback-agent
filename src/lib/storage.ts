@@ -271,17 +271,19 @@ export async function writeFrontRaw(data: FrontRawData): Promise<void> {
 /** Merge new Front data into existing, deduplicating by id */
 export async function mergeFrontRaw(newData: FrontRawData): Promise<FrontRawData> {
   await ensureSchema()
+  // Use 'update' so re-synced conversations get fresh data (updated_at, status, etc.)
   await batchUpsert(
     'front_conversations',
     'id',
     newData.conversations.map((c) => ({ id: c.id, data: c })),
-    'nothing'
+    'update'
   )
+  // Use 'update' for messages too so edited/updated message bodies are refreshed
   await batchUpsert(
     'front_messages',
     'id',
     newData.messages.map((m) => ({ id: m.id, data: m })),
-    'nothing'
+    'update'
   )
   const pool = getPool()
   await pool.query(
@@ -414,6 +416,24 @@ export async function writeFeedbackStore(store: { lastAnalyzedAt: string; items?
     "INSERT INTO app_meta (key, value) VALUES ('last_analyzed_at', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
     [store.lastAnalyzedAt]
   )
+}
+
+// Remove conversation IDs from analyzed_sources so they get re-analyzed.
+// Only clears entries that have no feedback items (avoids duplicate feedback).
+export async function unmarkAnalyzedSources(sourceIds: string[]): Promise<number> {
+  if (sourceIds.length === 0) return 0
+  await ensureSchema()
+  const pool = getPool()
+  const res = await pool.query(
+    `DELETE FROM analyzed_sources
+     WHERE source_id = ANY($1::text[])
+       AND NOT EXISTS (
+         SELECT 1 FROM feedback_items fi
+         WHERE fi.data->>'rawSourceId' = analyzed_sources.source_id
+       )`,
+    [sourceIds]
+  )
+  return res.rowCount ?? 0
 }
 
 // ─── Users ────────────────────────────────────────────────────────────────────
