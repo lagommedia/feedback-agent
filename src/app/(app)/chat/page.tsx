@@ -446,7 +446,7 @@ export default function ChatPage() {
           </button>
         </div>
 
-        <ScrollArea className="flex-1">
+        <div className="flex-1 overflow-y-auto">
           <div className="px-2 py-2">
             {loadingSessions ? (
               <div className="flex items-center justify-center py-8">
@@ -494,7 +494,7 @@ export default function ChatPage() {
               ))
             )}
           </div>
-        </ScrollArea>
+        </div>
       </aside>
 
       {/* ── Main chat area ── */}
