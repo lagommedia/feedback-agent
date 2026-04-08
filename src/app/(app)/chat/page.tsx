@@ -498,7 +498,7 @@ export default function ChatPage() {
       </aside>
 
       {/* ── Main chat area ── */}
-      <div className="flex flex-col flex-1 min-w-0">
+      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         {/* Header */}
         <div className="border-b px-8 py-4 shrink-0">
           <h1 className="text-xl font-bold">AI Chat</h1>
@@ -508,7 +508,7 @@ export default function ChatPage() {
         </div>
 
         {/* Messages */}
-        <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-8 py-6">
+        <div ref={messagesContainerRef} className="flex-1 min-h-0 overflow-y-auto px-8 py-6">
           {messages.length === 0 ? (
             <div className="max-w-2xl mx-auto">
               <div className="text-center mb-8">
