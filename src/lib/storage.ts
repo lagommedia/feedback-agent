@@ -544,7 +544,10 @@ export async function getUnanalyzedAvomaTranscripts(limit = 100): Promise<import
        SELECT 1 FROM feedback_items fi
        WHERE fi.data->>'rawSourceId' = at.meeting_uuid
      )
-       AND jsonb_array_length(at.data->'segments') > 1
+       -- Skip outbound sales calls (phone number pattern in title)
+       AND NOT (at.data->>'meetingTitle' ~* 'Call with .+ \\(\\+?1?[0-9]{10,11}\\)')
+       -- Require at least 8 segments — filters out voicemails and tiny calls
+       AND jsonb_array_length(at.data->'segments') >= 8
      ORDER BY (at.data->>'date') DESC
      LIMIT $1`,
     [limit]
@@ -595,7 +598,9 @@ export async function getUnanalyzedCounts(): Promise<{ avoma: number; front: num
   const pool = getPool()
   const [avoma, front] = await Promise.all([
     pool.query(`SELECT COUNT(*) FROM avoma_transcripts at
-      WHERE NOT EXISTS (SELECT 1 FROM feedback_items fi WHERE fi.data->>'rawSourceId' = at.meeting_uuid)`),
+      WHERE NOT EXISTS (SELECT 1 FROM feedback_items fi WHERE fi.data->>'rawSourceId' = at.meeting_uuid)
+        AND NOT (at.data->>'meetingTitle' ~* 'Call with .+ \\(\\+?1?[0-9]{10,11}\\)')
+        AND jsonb_array_length(at.data->'segments') >= 8`),
     pool.query(`SELECT COUNT(*) FROM front_conversations fc
       WHERE NOT EXISTS (SELECT 1 FROM feedback_items fi WHERE fi.data->>'rawSourceId' = fc.id)`),
   ])
