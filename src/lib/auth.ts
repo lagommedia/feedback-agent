@@ -33,7 +33,8 @@ function toBase64url(bytes: ArrayBuffer | Uint8Array): string {
 }
 
 function fromBase64url(str: string): Uint8Array {
-  const b64 = str.replace(/-/g, '+').replace(/_/g, '/') + '=='.slice((str.length * 3) % 4)
+  const pad = (4 - (str.length % 4)) % 4
+  const b64 = str.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat(pad)
   const raw = atob(b64)
   return new Uint8Array([...raw].map((c) => c.charCodeAt(0)))
 }
