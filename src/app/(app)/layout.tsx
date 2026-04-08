@@ -7,7 +7,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <SyncProvider>
       <Sidebar />
-      <main className="ml-60 min-h-screen">
+      <main className="ml-60 h-screen overflow-y-auto">
         {children}
       </main>
       <Toaster />

@@ -433,7 +433,7 @@ export default function ChatPage() {
   // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-full overflow-hidden">
       {/* ── Sessions sidebar ── */}
       <aside className="w-64 shrink-0 border-r flex flex-col bg-muted/20">
         <div className="px-3 py-3 border-b shrink-0">
