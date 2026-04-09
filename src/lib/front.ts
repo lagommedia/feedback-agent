@@ -207,8 +207,16 @@ async function fetchConversationMessages(
   return messages
 }
 
-export async function syncFront(token: string, since?: Date, internalEmails: string[] = [], inboxIds: string[] = []): Promise<FrontRawData> {
-  const conversations = await fetchAllConversations(token, since, internalEmails, inboxIds)
+export async function syncFront(
+  token: string,
+  since?: Date,
+  internalEmails: string[] = [],
+  inboxIds: string[] = [],
+  limit?: number  // cap how many conversations get messages fetched (for timeout safety)
+): Promise<FrontRawData> {
+  const allConversations = await fetchAllConversations(token, since, internalEmails, inboxIds)
+  // If a limit is set, take the most recently-updated conversations first
+  const conversations = limit ? allConversations.slice(0, limit) : allConversations
 
   const allMessages: FrontRawMessage[] = []
   const CONCURRENCY = 5

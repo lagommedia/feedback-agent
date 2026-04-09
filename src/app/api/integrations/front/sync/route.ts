@@ -11,7 +11,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Front is not configured' }, { status: 400 })
     }
 
-    const sinceParam = new URL(req.url).searchParams.get('since')
+    const url = new URL(req.url)
+    const sinceParam = url.searchParams.get('since')
+    const limitParam = url.searchParams.get('limit')
+    const perCallLimit = limitParam ? parseInt(limitParam) : 75
+
     const MAX_LOOKBACK_DAYS = 7
     const maxLookback = new Date()
     maxLookback.setDate(maxLookback.getDate() - MAX_LOOKBACK_DAYS)
@@ -26,7 +30,7 @@ export async function POST(req: Request) {
 
     const internalEmails = config.front.internalEmails ?? []
     const inboxIds = config.front.inboxIds ?? []
-    const data = await syncFront(config.front.bearerToken, since, internalEmails, inboxIds)
+    const data = await syncFront(config.front.bearerToken, since, internalEmails, inboxIds, perCallLimit)
     const merged = await mergeFrontRaw(data)
 
     // Clear re-synced conversations from analyzed_sources (if they have no feedback yet)
@@ -46,6 +50,7 @@ export async function POST(req: Request) {
       status: 'success',
       count: merged.conversations.length,
       clearedForReanalysis: cleared,
+      limit: perCallLimit,
     })
   } catch (err) {
     console.error('Front sync error:', err)
