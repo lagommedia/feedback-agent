@@ -31,11 +31,11 @@ export async function POST(req: Request) {
     const internalEmails = config.front.internalEmails ?? []
     const inboxIds = config.front.inboxIds ?? []
     const data = await syncFront(config.front.bearerToken, since, internalEmails, inboxIds, perCallLimit)
-    const merged = await mergeFrontRaw(data)
+    await mergeFrontRaw(data)
 
-    // Clear re-synced conversations from analyzed_sources (if they have no feedback yet)
-    // so they get re-analyzed with their latest messages
-    const syncedIds = merged.conversations.map((c) => c.id)
+    // Clear ONLY the conversations we actually just re-synced (fresh messages fetched)
+    // so they get re-analyzed. Use data.conversations, not merged (which is the full DB).
+    const syncedIds = data.conversations.map((c) => c.id)
     const cleared = await unmarkAnalyzedSources(syncedIds)
     console.log(`[Front sync] Cleared ${cleared} conversations from analyzed_sources for re-analysis`)
 
@@ -48,7 +48,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       source: 'front',
       status: 'success',
-      count: merged.conversations.length,
+      count: data.conversations.length,
       clearedForReanalysis: cleared,
       limit: perCallLimit,
     })

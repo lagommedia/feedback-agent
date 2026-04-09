@@ -290,7 +290,7 @@ export async function mergeFrontRaw(newData: FrontRawData): Promise<FrontRawData
     "INSERT INTO app_meta (key, value) VALUES ('front_fetched_at', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
     [newData.fetchedAt]
   )
-  return (await readFrontRaw())!
+  return newData
 }
 
 // ─── Slack Raw ────────────────────────────────────────────────────────────────
