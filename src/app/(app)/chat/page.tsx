@@ -15,6 +15,7 @@ import {
   Plus,
   Trash2,
   MessageSquare,
+  Download,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -282,6 +283,7 @@ export default function ChatPage() {
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const userScrolledUpRef = useRef(false)
+  const [exporting, setExporting] = useState(false)
 
   // ─── Load sessions on mount ──────────────────────────────────────────────────
 
@@ -428,6 +430,55 @@ export default function ChatPage() {
     }, 50)
   }
 
+  // ─── PDF Export ───────────────────────────────────────────────────────────────
+
+  async function handleExportPDF() {
+    if (!messagesContainerRef.current || messages.length === 0) return
+    setExporting(true)
+    try {
+      const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
+        import('jspdf'),
+        import('html2canvas'),
+      ])
+
+      const el = messagesContainerRef.current
+      const canvas = await html2canvas(el, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#09090b', // matches dark bg
+        scrollX: 0,
+        scrollY: 0,
+        width: el.scrollWidth,
+        height: el.scrollHeight,
+      })
+
+      const imgData = canvas.toDataURL('image/png')
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+      const pageW = pdf.internal.pageSize.getWidth()
+      const pageH = pdf.internal.pageSize.getHeight()
+      const imgW = pageW
+      const imgH = (canvas.height * imgW) / canvas.width
+
+      let y = 0
+      let remaining = imgH
+
+      while (remaining > 0) {
+        pdf.addImage(imgData, 'PNG', 0, -y, imgW, imgH)
+        remaining -= pageH
+        y += pageH
+        if (remaining > 0) pdf.addPage()
+      }
+
+      const activeSession = sessions.find(s => s.id === activeSessionId)
+      const filename = activeSession?.title
+        ? `${activeSession.title.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.pdf`
+        : 'chat-export.pdf'
+      pdf.save(filename)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const sessionGroups = groupSessions(sessions)
 
   // ─── Render ──────────────────────────────────────────────────────────────────
@@ -500,11 +551,28 @@ export default function ChatPage() {
       {/* ── Main chat area ── */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         {/* Header */}
-        <div className="border-b px-8 py-4 shrink-0">
-          <h1 className="text-xl font-bold">AI Chat</h1>
-          <p className="text-sm text-muted-foreground">
-            Ask questions about your product feedback data
-          </p>
+        <div className="border-b px-8 py-4 shrink-0 flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold">AI Chat</h1>
+            <p className="text-sm text-muted-foreground">
+              Ask questions about your product feedback data
+            </p>
+          </div>
+          {messages.length > 0 && (
+            <button
+              onClick={handleExportPDF}
+              disabled={exporting}
+              title="Download conversation as PDF"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 border border-border transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {exporting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+              {exporting ? 'Exporting…' : 'Export PDF'}
+            </button>
+          )}
         </div>
 
         {/* Messages */}
