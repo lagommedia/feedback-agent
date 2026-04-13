@@ -227,7 +227,7 @@ function AssigneeSelector({
       ) : (
         <button
           onClick={(e) => { e.stopPropagation(); setOpen(true) }}
-          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors"
         >
           + Assign
         </button>
