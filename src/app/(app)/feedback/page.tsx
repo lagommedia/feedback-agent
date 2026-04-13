@@ -353,7 +353,7 @@ function WorkflowStatusBar({
           const isFirst = idx === 0
           const isLast = idx === WORKFLOW_STAGES.length - 1
 
-          let bg = 'bg-muted/40 text-muted-foreground hover:bg-muted/70'
+          let bg = 'bg-violet-500/10 text-violet-400/70 hover:bg-violet-500/20'
           if (isActive) bg = 'bg-primary text-primary-foreground'
           else if (isPast) bg = 'bg-primary/20 text-primary hover:bg-primary/30'
 
