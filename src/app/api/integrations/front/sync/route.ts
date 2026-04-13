@@ -6,7 +6,7 @@ export const maxDuration = 300
 
 export async function POST(req: Request) {
   try {
-    const config = await readConfig()
+    let config = await readConfig()
     if (!config.front?.bearerToken) {
       return NextResponse.json({ error: 'Front is not configured' }, { status: 400 })
     }
@@ -14,23 +14,29 @@ export async function POST(req: Request) {
     const url = new URL(req.url)
     const sinceParam = url.searchParams.get('since')
     const limitParam = url.searchParams.get('limit')
+    const resetParam = url.searchParams.get('reset') === 'true'
     const perCallLimit = limitParam ? parseInt(limitParam) : 75
 
-    const MAX_LOOKBACK_DAYS = 7
-    const maxLookback = new Date()
-    maxLookback.setDate(maxLookback.getDate() - MAX_LOOKBACK_DAYS)
-    maxLookback.setHours(0, 0, 0, 0)
+    const frontConfig = config.front!
 
-    const lastSyncedAt = config.front.lastSyncedAt
+    // Default lookback: 90 days so we catch everything since April.
+    // If the integration has been synced recently, use that timestamp instead
+    // (unless an explicit since= param was passed, or reset=true).
+    const DEFAULT_LOOKBACK_DAYS = 90
+    const defaultLookback = new Date()
+    defaultLookback.setDate(defaultLookback.getDate() - DEFAULT_LOOKBACK_DAYS)
+    defaultLookback.setHours(0, 0, 0, 0)
+
+    const lastSyncedAt = resetParam ? undefined : frontConfig.lastSyncedAt
     const since = sinceParam
       ? new Date(sinceParam)
       : lastSyncedAt
-        ? new Date(Math.max(new Date(lastSyncedAt).getTime(), maxLookback.getTime()))
-        : maxLookback
+        ? new Date(lastSyncedAt)
+        : defaultLookback
 
-    const internalEmails = config.front.internalEmails ?? []
-    const inboxIds = config.front.inboxIds ?? []
-    const data = await syncFront(config.front.bearerToken, since, internalEmails, inboxIds, perCallLimit)
+    const internalEmails = frontConfig.internalEmails ?? []
+    const inboxIds = frontConfig.inboxIds ?? []
+    const data = await syncFront(frontConfig.bearerToken!, since, internalEmails, inboxIds, perCallLimit)
     await mergeFrontRaw(data)
 
     // Clear ONLY the conversations we actually just re-synced (fresh messages fetched)
@@ -41,7 +47,7 @@ export async function POST(req: Request) {
 
     const updatedConfig = {
       ...config,
-      front: { ...config.front, lastSyncedAt: new Date().toISOString() },
+      front: { ...frontConfig, lastSyncedAt: new Date().toISOString() },
     }
     await writeConfig(updatedConfig)
 

@@ -153,21 +153,25 @@ async function fetchAllConversations(
     return d
   })()
 
-  if (inboxIds.length > 0) {
-    // Fetch only from specified inboxes — much more targeted
-    const results = await Promise.all(
-      inboxIds.map(id =>
-        fetchConversationPage(token, `${BASE_URL}/inboxes/${id}/conversations`, sinceDate, internalEmails)
-      )
-    )
-    const all = results.flat()
-    // Deduplicate by conversation ID (same convo can appear in multiple inboxes)
-    const seen = new Set<string>()
-    return all.filter(c => seen.has(c.id) ? false : (seen.add(c.id), true))
-  }
+  // Always use the global /conversations endpoint — it properly respects q[after]
+  // so pagination stops at the date boundary instead of fetching everything.
+  // If inboxIds are configured, apply them as a local post-filter.
+  const all = await fetchConversationPage(token, `${BASE_URL}/conversations`, sinceDate, internalEmails)
 
-  // Fallback: fetch all conversations (no inbox filter configured)
-  return fetchConversationPage(token, `${BASE_URL}/conversations`, sinceDate, internalEmails)
+  if (inboxIds.length === 0) return all
+
+  const inboxSet = new Set(inboxIds)
+  return all.filter(c => {
+    // The conversation object may have inbox_id or inboxes depending on API version.
+    const raw = c as unknown as Record<string, unknown>
+    const ids: string[] = []
+    if (typeof raw.inbox_id === 'string') ids.push(raw.inbox_id)
+    const inboxes = raw.inboxes as Array<{ id: string }> | undefined
+    if (Array.isArray(inboxes)) inboxes.forEach(i => ids.push(i.id))
+    // If no inbox info, include it (over-include rather than miss)
+    if (ids.length === 0) return true
+    return ids.some(id => inboxSet.has(id))
+  })
 }
 
 async function fetchConversationMessages(
