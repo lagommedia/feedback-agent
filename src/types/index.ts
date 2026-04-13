@@ -164,6 +164,8 @@ export const TAGS_BY_APP_TYPE: Record<AppType, readonly string[]> = {
   churn_risk: CHURN_TAGS,
 }
 
+export type WorkflowStatus = 'reviewed' | 'action_plan' | 'in_progress' | 'completed'
+
 export interface FeedbackItem {
   id: string
   source: FeedbackSource
@@ -178,7 +180,8 @@ export interface FeedbackItem {
   tags: string[]
   rawSourceId: string
   analyzedAt: string
-  assignedTo?: string  // user email
+  assignedTo?: string       // user email
+  workflowStatus?: WorkflowStatus
 }
 
 export interface FeedbackStore {

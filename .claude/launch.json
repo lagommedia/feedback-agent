@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "Product Feedback Dev",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "/bin/bash",
+      "runtimeArgs": ["/Users/benashworth/.claude/scripts/feedback-dev.sh"],
       "port": 5001
     },
     {

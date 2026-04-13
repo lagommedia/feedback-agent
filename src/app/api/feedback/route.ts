@@ -90,7 +90,7 @@ export async function GET(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    const { id, type, customer, rep, tags, appType, assignedTo } = await req.json()
+    const { id, type, customer, rep, tags, appType, assignedTo, workflowStatus } = await req.json()
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
     const store = await readFeedbackStore()
@@ -106,6 +106,7 @@ export async function PATCH(req: NextRequest) {
               ...(tags !== undefined && { tags }),
               ...(appType !== undefined && { appType: appType as AppType }),
               ...(assignedTo !== undefined && { assignedTo: assignedTo || undefined }),
+              ...(workflowStatus !== undefined && { workflowStatus: workflowStatus || undefined }),
             }
           : i
       ),

@@ -15,7 +15,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { AlertCircle, ThumbsUp, Lightbulb, ChevronDown, ChevronUp, Search, Loader2, Pencil, Check, X as XIcon, MessageSquarePlus, ExternalLink, UserCircle, Building2 } from 'lucide-react'
-import type { FeedbackItem, FeedbackSource, FeedbackType, UrgencyLevel, AppType } from '@/types'
+import type { FeedbackItem, FeedbackSource, FeedbackType, UrgencyLevel, AppType, WorkflowStatus } from '@/types'
 import { PRODUCT_TAGS, SERVICE_TAGS, CHURN_TAGS, TAGS_BY_APP_TYPE, APP_TYPES } from '@/types'
 import { FeedbackDrawer } from '@/components/feedback/feedback-drawer'
 
@@ -327,6 +327,58 @@ function CompanyFilter({
   )
 }
 
+const WORKFLOW_STAGES: { value: WorkflowStatus; label: string }[] = [
+  { value: 'reviewed',    label: 'Reviewed' },
+  { value: 'action_plan', label: 'Action Plan' },
+  { value: 'in_progress', label: 'In Progress' },
+  { value: 'completed',   label: 'Completed' },
+]
+
+function WorkflowStatusBar({
+  status,
+  onChange,
+}: {
+  status?: WorkflowStatus
+  onChange: (s: WorkflowStatus | '') => void
+}) {
+  const currentIndex = status ? WORKFLOW_STAGES.findIndex((s) => s.value === status) : -1
+
+  return (
+    <div className="mt-3 pt-3 border-t border-border/60">
+      <p className="text-xs text-muted-foreground mb-2">Status</p>
+      <div className="flex items-stretch gap-0">
+        {WORKFLOW_STAGES.map((stage, idx) => {
+          const isActive = stage.value === status
+          const isPast = currentIndex >= 0 && idx < currentIndex
+          const isFirst = idx === 0
+          const isLast = idx === WORKFLOW_STAGES.length - 1
+
+          let bg = 'bg-muted/40 text-muted-foreground hover:bg-muted/70'
+          if (isActive) bg = 'bg-primary text-primary-foreground'
+          else if (isPast) bg = 'bg-primary/20 text-primary hover:bg-primary/30'
+
+          return (
+            <button
+              key={stage.value}
+              onClick={(e) => {
+                e.stopPropagation()
+                onChange(isActive ? '' : stage.value)
+              }}
+              className={`flex-1 px-2 py-1.5 text-[11px] font-medium transition-colors border border-border/50 ${bg} ${
+                isFirst ? 'rounded-l-md' : ''
+              } ${isLast ? 'rounded-r-md' : ''} ${
+                !isFirst ? '-ml-px' : ''
+              }`}
+            >
+              {stage.label}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export default function FeedbackPage() {
   return (
     <Suspense fallback={<div className="p-8 text-muted-foreground text-sm">Loading...</div>}>
@@ -351,7 +403,6 @@ function FeedbackList() {
   const [editing, setEditing] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState<{ type: FeedbackType; appType: AppType; customer: string; rep: string; tags: string[] } | null>(null)
   const [saving, setSaving] = useState(false)
-  const [trainState, setTrainState] = useState<Record<string, { action: string; notes: string }>>({})
   const [drawerItem, setDrawerItem] = useState<FeedbackItem | null>(null)
   const [currentUser, setCurrentUser] = useState<string | null>(null)
   const [users, setUsers] = useState<{ email: string }[]>([])
@@ -375,49 +426,22 @@ function FeedbackList() {
     setEditDraft(null)
   }
 
-  async function submitTraining(item: FeedbackItem) {
-    const state = trainState[item.id]
-    if (!state?.action || !state?.notes?.trim()) return
-
-    const [action, targetType] = state.action.split(':')
-
-    // Optimistic update — reflect immediately in UI
+  function handleTrained(id: string, action: string, targetType?: string) {
     if (action === 'remove') {
-      setItems((prev) => prev.filter((i) => i.id !== item.id))
+      setItems((prev) => prev.filter((i) => i.id !== id))
       setExpanded(null)
-    } else {
-      setItems((prev) => prev.map((i) => i.id === item.id ? { ...i, appType: targetType as AppType } : i))
+    } else if (targetType) {
+      setItems((prev) => prev.map((i) => i.id === id ? { ...i, appType: targetType as AppType } : i))
     }
-    setTrainState((prev) => { const next = { ...prev }; delete next[item.id]; return next })
+  }
 
-    // Persist in background — revert on failure
-    try {
-      const res = await fetch(`/api/feedback/${item.id}/action`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, targetType, notes: state.notes }),
-      })
-      if (!res.ok) {
-        const data = await res.json()
-        // Revert
-        if (action === 'remove') {
-          setItems((prev) => [item, ...prev])
-          setExpanded(item.id)
-        } else {
-          setItems((prev) => prev.map((i) => i.id === item.id ? item : i))
-        }
-        alert(data.error ?? 'Failed to apply — change reverted')
-      }
-    } catch {
-      // Revert on network error
-      if (action === 'remove') {
-        setItems((prev) => [item, ...prev])
-        setExpanded(item.id)
-      } else {
-        setItems((prev) => prev.map((i) => i.id === item.id ? item : i))
-      }
-      alert('Network error — change reverted')
-    }
+  async function saveWorkflowStatus(id: string, status: WorkflowStatus | '') {
+    setItems((prev) => prev.map((i) => i.id === id ? { ...i, workflowStatus: status || undefined } : i))
+    await fetch('/api/feedback', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, workflowStatus: status }),
+    })
   }
 
   async function saveAssignment(id: string, email: string) {
@@ -868,6 +892,14 @@ function FeedbackList() {
                     />
                   </div>
 
+                  {/* Workflow Status Bar — shown when item is assigned */}
+                  {item.assignedTo && (
+                    <WorkflowStatusBar
+                      status={item.workflowStatus}
+                      onChange={(s) => saveWorkflowStatus(item.id, s)}
+                    />
+                  )}
+
                   <div className="flex items-end justify-between mt-3">
                     <p className="text-xs text-muted-foreground">
                       Source ID: <span className="font-mono">{item.rawSourceId}</span> · Analyzed {new Date(item.analyzedAt).toLocaleString()}
@@ -880,54 +912,6 @@ function FeedbackList() {
                       Feedback
                     </button>
                   </div>
-
-                  {/* Training section */}
-                  <div className="mt-4 pt-4 border-t border-border/60">
-                    <p className="text-xs font-medium text-muted-foreground mb-2.5">Train Classifier</p>
-                    <div className="flex flex-col gap-2">
-                      <select
-                        value={trainState[item.id]?.action ?? ''}
-                        onChange={(e) =>
-                          setTrainState((prev) => ({
-                            ...prev,
-                            [item.id]: { ...prev[item.id], action: e.target.value, notes: prev[item.id]?.notes ?? '' },
-                          }))
-                        }
-                        className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring [color-scheme:dark]"
-                      >
-                        <option value="">Select an action…</option>
-                        <option value="remove">Remove — not useful feedback</option>
-                        <option value="move:product">Move to Product Feedback</option>
-                        <option value="move:service">Move to Service Feedback</option>
-                        <option value="move:churn_risk">Move to Churn Risk</option>
-                      </select>
-                      {trainState[item.id]?.action && (
-                        <>
-                          <textarea
-                            rows={2}
-                            placeholder="Why? Your notes help train future classifications… (required)"
-                            value={trainState[item.id]?.notes ?? ''}
-                            onChange={(e) =>
-                              setTrainState((prev) => ({
-                                ...prev,
-                                [item.id]: { ...prev[item.id], notes: e.target.value },
-                              }))
-                            }
-                            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none [color-scheme:dark]"
-                          />
-                          <div className="flex justify-end">
-                            <button
-                              onClick={(e) => { e.stopPropagation(); submitTraining(item) }}
-                              disabled={!trainState[item.id]?.notes?.trim()}
-                              className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                              Apply Training
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
                 </div>
               )}
             </Card>
@@ -939,6 +923,7 @@ function FeedbackList() {
         item={drawerItem}
         open={drawerItem !== null}
         onClose={() => setDrawerItem(null)}
+        onTrained={handleTrained}
       />
     </div>
   )
