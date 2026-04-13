@@ -15,7 +15,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { AlertCircle, ThumbsUp, Lightbulb, ChevronDown, ChevronUp, Search, Loader2, Pencil, Check, X as XIcon, MessageSquarePlus, ExternalLink, UserCircle, Building2 } from 'lucide-react'
-import type { FeedbackItem, FeedbackSource, FeedbackType, UrgencyLevel, AppType, WorkflowStatus } from '@/types'
+import type { FeedbackItem, FeedbackSource, FeedbackType, UrgencyLevel, AppType, WorkflowStatus, ActionItem } from '@/types'
 import { PRODUCT_TAGS, SERVICE_TAGS, CHURN_TAGS, TAGS_BY_APP_TYPE, APP_TYPES } from '@/types'
 import { FeedbackDrawer } from '@/components/feedback/feedback-drawer'
 
@@ -335,13 +335,57 @@ const WORKFLOW_STAGES: { value: WorkflowStatus; label: string }[] = [
 ]
 
 function WorkflowStatusBar({
-  status,
-  onChange,
+  item,
+  onUpdate,
 }: {
-  status?: WorkflowStatus
-  onChange: (s: WorkflowStatus | '') => void
+  item: FeedbackItem
+  onUpdate: (updates: { workflowStatus?: WorkflowStatus | ''; reviewedNotes?: string; actionItems?: ActionItem[] }) => void
 }) {
+  const status = item.workflowStatus
   const currentIndex = status ? WORKFLOW_STAGES.findIndex((s) => s.value === status) : -1
+
+  const [openPanel, setOpenPanel] = useState<WorkflowStatus | null>(null)
+  const [notesDraft, setNotesDraft] = useState(item.reviewedNotes ?? '')
+  const [newActionText, setNewActionText] = useState('')
+  const [actionDraft, setActionDraft] = useState<ActionItem[]>(item.actionItems ?? [])
+
+  useEffect(() => {
+    setNotesDraft(item.reviewedNotes ?? '')
+    setActionDraft(item.actionItems ?? [])
+    setOpenPanel(null)
+  }, [item.id])
+
+  function handleStageClick(stage: WorkflowStatus) {
+    if (status === stage) {
+      setOpenPanel(openPanel === stage ? null : stage)
+    } else {
+      onUpdate({ workflowStatus: stage })
+      setOpenPanel(stage)
+    }
+  }
+
+  function saveNotes() {
+    onUpdate({ reviewedNotes: notesDraft })
+    setOpenPanel(null)
+  }
+
+  function addActionItem() {
+    if (!newActionText.trim()) return
+    setActionDraft((prev) => [...prev, { id: crypto.randomUUID(), text: newActionText.trim(), checked: false }])
+    setNewActionText('')
+  }
+
+  function saveActionPlan() {
+    if (actionDraft.length === 0) return
+    onUpdate({ actionItems: actionDraft, workflowStatus: 'in_progress' })
+    setOpenPanel('in_progress')
+  }
+
+  function toggleActionItem(id: string) {
+    const updated = (item.actionItems ?? []).map((i) => i.id === id ? { ...i, checked: !i.checked } : i)
+    const allDone = updated.length > 0 && updated.every((i) => i.checked)
+    onUpdate({ actionItems: updated, ...(allDone ? { workflowStatus: 'completed' } : {}) })
+  }
 
   return (
     <div className="mt-3 pt-3 border-t border-border/60">
@@ -352,6 +396,7 @@ function WorkflowStatusBar({
           const isPast = currentIndex >= 0 && idx < currentIndex
           const isFirst = idx === 0
           const isLast = idx === WORKFLOW_STAGES.length - 1
+          const isPanelOpen = openPanel === stage.value
 
           let bg = 'bg-violet-500/10 text-violet-400/70 hover:bg-violet-500/20'
           if (isActive) bg = 'bg-primary text-primary-foreground'
@@ -360,21 +405,153 @@ function WorkflowStatusBar({
           return (
             <button
               key={stage.value}
-              onClick={(e) => {
-                e.stopPropagation()
-                onChange(isActive ? '' : stage.value)
-              }}
+              onClick={(e) => { e.stopPropagation(); handleStageClick(stage.value) }}
               className={`flex-1 px-2 py-1.5 text-[11px] font-medium transition-colors border border-border/50 ${bg} ${
                 isFirst ? 'rounded-l-md' : ''
               } ${isLast ? 'rounded-r-md' : ''} ${
                 !isFirst ? '-ml-px' : ''
-              }`}
+              } ${isPanelOpen ? 'ring-1 ring-inset ring-primary/60' : ''}`}
             >
               {stage.label}
             </button>
           )
         })}
       </div>
+
+      {/* Stage panels */}
+      {openPanel && (
+        <div
+          className="mt-2 rounded-lg border border-border bg-background shadow-lg p-4"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Reviewed — optional notes */}
+          {openPanel === 'reviewed' && (
+            <div className="space-y-3">
+              <p className="text-xs font-medium text-muted-foreground">
+                Review Notes <span className="font-normal opacity-60">(optional)</span>
+              </p>
+              <textarea
+                rows={3}
+                value={notesDraft}
+                onChange={(e) => setNotesDraft(e.target.value)}
+                placeholder="Add any notes about your review…"
+                className="w-full rounded-md border border-input bg-muted/30 px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none [color-scheme:dark]"
+              />
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setOpenPanel(null)} className="text-xs text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
+                <button onClick={saveNotes} className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors">Save</button>
+              </div>
+            </div>
+          )}
+
+          {/* Action Plan — build checklist */}
+          {openPanel === 'action_plan' && (
+            <div className="space-y-3">
+              <p className="text-xs font-medium text-muted-foreground">Action Items</p>
+              <div className="flex gap-2">
+                <input
+                  value={newActionText}
+                  onChange={(e) => setNewActionText(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addActionItem() } }}
+                  placeholder="Add an action item…"
+                  className="flex-1 h-8 rounded-md border border-input bg-muted/30 px-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+                <button
+                  onClick={addActionItem}
+                  disabled={!newActionText.trim()}
+                  className="px-3 h-8 rounded-md bg-primary/20 text-primary text-xs font-medium hover:bg-primary/30 transition-colors disabled:opacity-40"
+                >
+                  Add
+                </button>
+              </div>
+              {actionDraft.length > 0 && (
+                <ul className="space-y-1.5">
+                  {actionDraft.map((ai) => (
+                    <li key={ai.id} className="flex items-center gap-2 text-xs">
+                      <span className="flex-1 text-foreground">{ai.text}</span>
+                      <button
+                        onClick={() => setActionDraft((prev) => prev.filter((i) => i.id !== ai.id))}
+                        className="text-muted-foreground hover:text-destructive transition-colors"
+                      >
+                        <XIcon className="w-3 h-3" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="flex justify-end gap-2 pt-1 border-t border-border/40">
+                <button onClick={() => setOpenPanel(null)} className="text-xs text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
+                <button
+                  onClick={saveActionPlan}
+                  disabled={actionDraft.length === 0}
+                  className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Save & Start
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* In Progress — check off tasks */}
+          {openPanel === 'in_progress' && (
+            <div className="space-y-3">
+              <p className="text-xs font-medium text-muted-foreground">Action Items</p>
+              {(item.actionItems ?? []).length === 0 ? (
+                <p className="text-xs text-muted-foreground">No action items. Go back to Action Plan to add some.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {(item.actionItems ?? []).map((ai) => (
+                    <li key={ai.id} className="flex items-center gap-2.5">
+                      <button
+                        onClick={() => toggleActionItem(ai.id)}
+                        className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                          ai.checked ? 'bg-primary border-primary' : 'border-border hover:border-primary/60'
+                        }`}
+                      >
+                        {ai.checked && <Check className="w-2.5 h-2.5 text-primary-foreground" />}
+                      </button>
+                      <span className={`text-xs transition-colors ${ai.checked ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
+                        {ai.text}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="flex justify-end pt-1 border-t border-border/40">
+                <button onClick={() => setOpenPanel(null)} className="text-xs text-muted-foreground hover:text-foreground transition-colors">Close</button>
+              </div>
+            </div>
+          )}
+
+          {/* Completed — summary */}
+          {openPanel === 'completed' && (
+            <div className="space-y-3">
+              <p className="text-xs font-medium" style={{ color: '#00C805' }}>All done!</p>
+              {(item.actionItems ?? []).length > 0 && (
+                <ul className="space-y-1.5">
+                  {(item.actionItems ?? []).map((ai) => (
+                    <li key={ai.id} className="flex items-center gap-2.5">
+                      <div className="w-4 h-4 rounded border border-primary bg-primary flex items-center justify-center shrink-0">
+                        <Check className="w-2.5 h-2.5 text-primary-foreground" />
+                      </div>
+                      <span className="text-xs line-through text-muted-foreground">{ai.text}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {item.reviewedNotes && (
+                <div className="pt-2 border-t border-border/60">
+                  <p className="text-xs text-muted-foreground font-medium mb-1">Review Notes</p>
+                  <p className="text-xs text-muted-foreground">{item.reviewedNotes}</p>
+                </div>
+              )}
+              <div className="flex justify-end pt-1 border-t border-border/40">
+                <button onClick={() => setOpenPanel(null)} className="text-xs text-muted-foreground hover:text-foreground transition-colors">Close</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -435,12 +612,16 @@ function FeedbackList() {
     }
   }
 
-  async function saveWorkflowStatus(id: string, status: WorkflowStatus | '') {
-    setItems((prev) => prev.map((i) => i.id === id ? { ...i, workflowStatus: status || undefined } : i))
+  async function updateFeedbackItem(id: string, updates: { workflowStatus?: WorkflowStatus | ''; reviewedNotes?: string; actionItems?: ActionItem[] }) {
+    setItems((prev) => prev.map((i) => i.id === id ? {
+      ...i,
+      ...updates,
+      workflowStatus: updates.workflowStatus === '' ? undefined : (updates.workflowStatus ?? i.workflowStatus),
+    } : i))
     await fetch('/api/feedback', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, workflowStatus: status }),
+      body: JSON.stringify({ id, ...updates }),
     })
   }
 
@@ -895,8 +1076,8 @@ function FeedbackList() {
                   {/* Workflow Status Bar — shown when item is assigned */}
                   {item.assignedTo && (
                     <WorkflowStatusBar
-                      status={item.workflowStatus}
-                      onChange={(s) => saveWorkflowStatus(item.id, s)}
+                      item={item}
+                      onUpdate={(updates) => updateFeedbackItem(item.id, updates)}
                     />
                   )}
 

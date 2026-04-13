@@ -166,6 +166,12 @@ export const TAGS_BY_APP_TYPE: Record<AppType, readonly string[]> = {
 
 export type WorkflowStatus = 'reviewed' | 'action_plan' | 'in_progress' | 'completed'
 
+export interface ActionItem {
+  id: string
+  text: string
+  checked: boolean
+}
+
 export interface FeedbackItem {
   id: string
   source: FeedbackSource
@@ -182,6 +188,8 @@ export interface FeedbackItem {
   analyzedAt: string
   assignedTo?: string       // user email
   workflowStatus?: WorkflowStatus
+  reviewedNotes?: string
+  actionItems?: ActionItem[]
 }
 
 export interface FeedbackStore {
