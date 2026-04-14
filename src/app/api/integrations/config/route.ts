@@ -32,6 +32,12 @@ export async function GET() {
         apiKey: maskKey(config.anthropic.apiKey),
       }
     }
+    if (config.chargebee) {
+      masked.chargebee = {
+        ...config.chargebee,
+        apiKey: maskKey(config.chargebee.apiKey),
+      }
+    }
 
     return NextResponse.json({ config: masked })
   } catch (err) {

@@ -26,6 +26,12 @@ export interface IntegrationConfig {
     serviceInstructions?: string
     churnInstructions?: string
   }
+  chargebee?: {
+    apiKey: string
+    site: string
+    lastSyncedAt?: string
+    instructions?: string
+  }
 }
 
 // ─── Raw Data Shapes ──────────────────────────────────────────────────────────

@@ -16,6 +16,7 @@ const LOGOS: Record<string, string> = {
   'Avoma':        'https://www.google.com/s2/favicons?domain=avoma.com&sz=64',
   'Front':        'https://www.google.com/s2/favicons?domain=front.com&sz=64',
   'Slack':        'https://www.google.com/s2/favicons?domain=slack.com&sz=64',
+  'Chargebee':    'https://www.google.com/s2/favicons?domain=chargebee.com&sz=64',
 }
 
 export default function IntegrationsPage() {
@@ -25,6 +26,7 @@ export default function IntegrationsPage() {
   const [front, setFront] = useState({ bearerToken: '', instructions: '', internalEmails: '', inboxIds: '' })
   const [slack, setSlack] = useState({ botToken: '', channelIds: '', instructions: '' })
   const [anthropic, setAnthropic] = useState({ apiKey: '', instructions: '', productInstructions: '', serviceInstructions: '', churnInstructions: '' })
+  const [chargebee, setChargebee] = useState({ apiKey: '', site: '', instructions: '' })
   const [saving, setSaving] = useState<string | null>(null)
 
   // Load existing instructions from saved config on mount
@@ -49,6 +51,13 @@ export default function IntegrationsPage() {
             productInstructions: config.anthropic.productInstructions ?? s.productInstructions,
             serviceInstructions: config.anthropic.serviceInstructions ?? s.serviceInstructions,
             churnInstructions: config.anthropic.churnInstructions ?? s.churnInstructions,
+          }))
+        }
+        if (config?.chargebee) {
+          setChargebee((s) => ({
+            ...s,
+            site: config.chargebee.site ?? s.site,
+            instructions: config.chargebee.instructions ?? s.instructions,
           }))
         }
       })
@@ -280,6 +289,52 @@ export default function IntegrationsPage() {
               />
               <p className="text-xs text-muted-foreground mt-1">
                 Conversations where the recipient is one of these addresses will be excluded from sync. Useful for filtering out sales and BDR rep email threads.
+              </p>
+            </div>
+          </div>
+        </IntegrationCard>
+
+        {/* Chargebee */}
+        <IntegrationCard
+          name="Chargebee"
+          description="Subscription billing and customer data. Pull in subscription status, MRR, and churn signals to enrich your feedback with revenue context."
+          status={!!chargebee.site && !!chargebee.apiKey}
+          instructions={chargebee.instructions}
+          instructionsPlaceholder="E.g. 'Flag customers who are on trial or have a past-due invoice as higher churn risk when their feedback is negative.'"
+          onInstructionsChange={(v) => setChargebee((s) => ({ ...s, instructions: v }))}
+          onSave={() => saveConfig('chargebee', {
+            apiKey: chargebee.apiKey,
+            site: chargebee.site,
+            instructions: chargebee.instructions,
+          })}
+          saving={saving === 'chargebee'}
+        >
+          <div className="space-y-3">
+            <div>
+              <Label htmlFor="chargebee-site">Site Name</Label>
+              <Input
+                id="chargebee-site"
+                placeholder="your-company"
+                value={chargebee.site}
+                onChange={(e) => setChargebee((s) => ({ ...s, site: e.target.value }))}
+                className="mt-1"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                The subdomain of your Chargebee account — e.g. <span className="font-mono">your-company</span> from <span className="font-mono">your-company.chargebee.com</span>
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="chargebee-key">API Key</Label>
+              <Input
+                id="chargebee-key"
+                type="password"
+                placeholder="Your Chargebee API key"
+                value={chargebee.apiKey}
+                onChange={(e) => setChargebee((s) => ({ ...s, apiKey: e.target.value }))}
+                className="mt-1"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Find your API key in Chargebee → Settings → Configure Chargebee → API Keys
               </p>
             </div>
           </div>
