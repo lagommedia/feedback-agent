@@ -556,6 +556,114 @@ function WorkflowStatusBar({
   )
 }
 
+function AssignedFilter({
+  value,
+  users,
+  currentUser,
+  onChange,
+}: {
+  value: string
+  users: { email: string }[]
+  currentUser: string | null
+  onChange: (v: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  const filtered = users.filter((u) =>
+    u.email.toLowerCase().includes(query.toLowerCase())
+  ).slice(0, 50)
+
+  useEffect(() => {
+    if (open) {
+      setQuery('')
+      setTimeout(() => inputRef.current?.focus(), 0)
+    }
+  }, [open])
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  return (
+    <div ref={containerRef} className="flex flex-col gap-1 relative">
+      <span className="text-xs text-muted-foreground font-medium px-0.5">Assigned</span>
+
+      {value && !open ? (
+        <div className="flex items-center gap-1 h-9">
+          <button
+            onClick={() => setOpen(true)}
+            className="flex items-center gap-1.5 rounded-full bg-primary/15 text-primary text-xs font-medium px-2.5 py-1 hover:bg-primary/25 transition-colors max-w-[180px]"
+          >
+            <span className="w-4 h-4 rounded-full bg-primary/30 flex items-center justify-center text-[9px] font-bold shrink-0">
+              {value.slice(0, 2).toUpperCase()}
+            </span>
+            <span className="truncate">{value === currentUser ? 'My Items' : value}</span>
+          </button>
+          <button
+            onClick={() => onChange('')}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+            title="Clear filter"
+          >
+            <XIcon className="w-3 h-3" />
+          </button>
+        </div>
+      ) : (
+        <div className="relative">
+          <UserCircle className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Search assignee…"
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setOpen(true) }}
+            onFocus={() => setOpen(true)}
+            className="h-9 w-44 pl-8 pr-3 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+          />
+          {open && (
+            <div className="absolute top-full mt-1 left-0 w-56 bg-popover border border-border rounded-lg shadow-lg z-50 py-1 max-h-56 overflow-y-auto">
+              {/* My Items shortcut */}
+              {currentUser && (
+                <button
+                  onClick={() => { onChange(currentUser); setOpen(false) }}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-muted/50 transition-colors border-b border-border/40"
+                >
+                  <UserCircle className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span className="text-primary font-medium">My Items</span>
+                </button>
+              )}
+              {filtered.length === 0 ? (
+                <p className="px-3 py-2 text-xs text-muted-foreground">No users found</p>
+              ) : (
+                filtered.map((u) => (
+                  <button
+                    key={u.email}
+                    onClick={() => { onChange(u.email); setOpen(false) }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-muted/50 transition-colors"
+                  >
+                    <span className="w-5 h-5 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[9px] font-bold shrink-0">
+                      {u.email.slice(0, 2).toUpperCase()}
+                    </span>
+                    <span className="truncate">{u.email}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function FeedbackPage() {
   return (
     <Suspense fallback={<div className="p-8 text-muted-foreground text-sm">Loading...</div>}>
@@ -750,22 +858,12 @@ function FeedbackList() {
           options={allCustomers}
           onChange={setCompanyFilter}
         />
-        {currentUser && (
-          <div className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground font-medium px-0.5">Assigned</span>
-            <button
-              onClick={() => setAssignedToFilter(assignedToFilter === currentUser ? '' : currentUser)}
-              className={`h-9 px-3 rounded-md text-xs font-medium border transition-colors ${
-                assignedToFilter === currentUser
-                  ? 'bg-primary/15 text-primary border-primary/30'
-                  : 'bg-background text-muted-foreground border-input hover:text-foreground'
-              }`}
-            >
-              <UserCircle className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />
-              My Items
-            </button>
-          </div>
-        )}
+        <AssignedFilter
+          value={assignedToFilter}
+          users={users}
+          currentUser={currentUser}
+          onChange={setAssignedToFilter}
+        />
         <div className="flex flex-col gap-1">
           <span className="text-xs text-muted-foreground font-medium px-0.5">
             {appParam === 'service' ? 'Service Areas' : appParam === 'churn_risk' ? 'Churn Reasons' : 'Product Areas'}
