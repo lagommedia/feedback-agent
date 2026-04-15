@@ -112,7 +112,7 @@ export interface SlackRawData {
 // ─── Structured Feedback Item ─────────────────────────────────────────────────
 
 export type FeedbackSource = 'avoma' | 'front' | 'slack'
-export type FeedbackType = 'issue' | 'praise' | 'feature_request'
+export type FeedbackType = 'issue' | 'praise' | 'recommendation'
 export type UrgencyLevel = 'low' | 'medium' | 'high'
 export type AppType = 'product' | 'service' | 'churn_risk'
 

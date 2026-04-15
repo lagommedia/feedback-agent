@@ -9,12 +9,12 @@ export interface TimelineBucket {
   label: string     // "Mar 4"
   issue: number
   praise: number
-  feature_request: number
+  recommendation: number
 }
 
 const COLORS = {
   issue:           { fill: '#FF5000', label: 'Issues' },
-  feature_request: { fill: '#0096FF', label: 'Feature Requests' },
+  recommendation: { fill: '#0096FF', label: 'Recommendations' },
   praise:          { fill: '#00C805', label: 'Praises' },
 } as const
 
@@ -43,7 +43,7 @@ export function FeedbackTimeline({
     return `/feedback?${p.toString()}`
   }
 
-  const maxTotal = Math.max(...buckets.map((b) => b.issue + b.praise + b.feature_request), 1)
+  const maxTotal = Math.max(...buckets.map((b) => b.issue + b.praise + b.recommendation), 1)
   const yMax = Math.ceil(maxTotal / 2) * 2 || 2
   const yTicks = Array.from({ length: yMax + 1 }, (_, i) => i).filter(
     (v) => v === 0 || v === Math.round(yMax / 2) || v === yMax
@@ -130,7 +130,7 @@ export function FeedbackTimeline({
           const x = barX(i)
           const segments: Array<{ key: TypeKey; value: number }> = [
             { key: 'issue', value: bucket.issue },
-            { key: 'feature_request', value: bucket.feature_request },
+            { key: 'recommendation', value: bucket.recommendation },
             { key: 'praise', value: bucket.praise },
           ]
 

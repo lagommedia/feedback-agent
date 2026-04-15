@@ -29,8 +29,8 @@ const REPORT_TYPES: { value: ReportRequest['type']; label: string; description: 
   },
   {
     value: 'feature_requests',
-    label: 'Feature Requests',
-    description: 'Customer feature requests ranked by frequency and business impact',
+    label: 'Recommendations',
+    description: 'Customer recommendations ranked by frequency and business impact',
   },
   {
     value: 'custom',

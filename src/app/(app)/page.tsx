@@ -110,7 +110,7 @@ export default async function DashboardPage({
   const byType = {
     issue: items.filter((i) => i.type === 'issue').length,
     praise: items.filter((i) => i.type === 'praise').length,
-    feature_request: items.filter((i) => i.type === 'feature_request').length,
+    recommendation: items.filter((i) => i.type === 'recommendation').length,
   }
 
   const byUrgency = {
@@ -165,7 +165,7 @@ export default async function DashboardPage({
           label,
           issue: weekItems.filter((x) => x.type === 'issue').length,
           praise: weekItems.filter((x) => x.type === 'praise').length,
-          feature_request: weekItems.filter((x) => x.type === 'feature_request').length,
+          recommendation: weekItems.filter((x) => x.type === 'recommendation').length,
         })
         cursor.setDate(cursor.getDate() + 7)
       }
@@ -184,7 +184,7 @@ export default async function DashboardPage({
         label,
         issue: dayItems.filter((x) => x.type === 'issue').length,
         praise: dayItems.filter((x) => x.type === 'praise').length,
-        feature_request: dayItems.filter((x) => x.type === 'feature_request').length,
+        recommendation: dayItems.filter((x) => x.type === 'recommendation').length,
       }
     })
   })()
@@ -290,9 +290,9 @@ export default async function DashboardPage({
           }
         />
         <StatCard
-          title="Feature Requests"
-          value={byType.feature_request}
-          href={`/feedback?type=feature_request${appSuffix}`}
+          title="Recommendations"
+          value={byType.recommendation}
+          href={`/feedback?type=recommendation${appSuffix}`}
           icon={
             <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: `${RH.feature}22` }}>
               <Lightbulb className="w-5 h-5" style={{ color: RH.feature }} />

@@ -106,7 +106,7 @@ export function DashboardDateFilter({
             <SelectItem value="">All Feedback Types</SelectItem>
             <SelectItem value="issue">Issues</SelectItem>
             <SelectItem value="praise">Praises</SelectItem>
-            <SelectItem value="feature_request">Feature Requests</SelectItem>
+            <SelectItem value="recommendation">Recommendations</SelectItem>
           </SelectContent>
         </Select>
       </div>

@@ -125,7 +125,8 @@ function typeIcon(type: FeedbackType) {
 }
 
 function typeLabel(type: FeedbackType) {
-  return type === 'feature_request' ? 'Feature Request' : type.charAt(0).toUpperCase() + type.slice(1)
+  if (type === 'recommendation') return 'Recommendation'
+  return type.charAt(0).toUpperCase() + type.slice(1)
 }
 
 function sourceLabel(source: FeedbackSource) {
@@ -904,7 +905,7 @@ function FeedbackList() {
               <SelectItem value="">All Feedback Types</SelectItem>
               <SelectItem value="issue">Issues</SelectItem>
               <SelectItem value="praise">Praises</SelectItem>
-              <SelectItem value="feature_request">Feature Requests</SelectItem>
+              <SelectItem value="recommendation">Recommendations</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -1113,7 +1114,7 @@ function FeedbackList() {
                         >
                           <option value="issue">Issue</option>
                           <option value="praise">Praise</option>
-                          <option value="feature_request">Feature Request</option>
+                          <option value="recommendation">Recommendation</option>
                         </select>
                       ) : (
                         <p className="font-medium">{typeLabel(item.type)}</p>

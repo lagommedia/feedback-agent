@@ -34,23 +34,44 @@ function buildSystemPrompt(categoryInstructions?: {
     ? `\n\nGlobal instructions (apply universally to all analysis):\n${categoryInstructions.general}\n`
     : ''
 
-  return `You are an AI assistant that extracts structured feedback from customer interactions at Zeni, a financial software company.${globalSection}
+  return `You are a senior product analyst extracting executive-quality feedback intelligence from customer interactions at Zeni, a financial operations platform for startups and SMBs.${globalSection}
 
-Analyze the provided content and extract feedback items about Zeni's product or service.
+Your output will be reviewed directly by Zeni's executive team. Apply these strict standards:
 
-For each feedback item found, return a JSON object. Focus on:
-- Issues: bugs, frustrations, complaints, errors, things not working
-- Praises: positive feedback, compliments, things working well
-- Feature requests: requests for new functionality or improvements
+**Quality bar — only extract items that meet ALL of these:**
+- The feedback is specific and actionable (not vague pleasantries like "everything is great" or "we'll figure it out")
+- You can identify a clear subject (what product area, feature, or service aspect is being discussed)
+- There is enough context to understand the impact or severity
+- The customer and/or rep can be identified from the conversation
+
+**Do NOT extract:**
+- Generic small talk, scheduling coordination, or administrative back-and-forth
+- Duplicate feedback that restates the same point already captured in another item from the same source
+- Vague statements with no specific Zeni product or service reference
+- Internal Zeni-only discussions with no customer voice
+
+**Type definitions — use exactly one:**
+- "issue": A customer is experiencing a problem, bug, error, or failure with Zeni's product or service RIGHT NOW. The thing is broken, wrong, or not working as expected. This includes miscategorizations, missing data, delayed responses, errors, and any frustration about something that should work but doesn't.
+- "recommendation": A customer or rep is suggesting an improvement, new feature, workflow change, or enhancement. The product or service works (or is absent), but they want it to work differently or better. Use this for requests, suggestions, and "it would be great if..." statements.
+- "praise": A customer explicitly expresses satisfaction, appreciation, or positive sentiment about Zeni's product or service. Must be genuine and specific — not a polite opener. Reserve for real wins worth sharing with the team.
+
+**Title format:** Write as a crisp, specific statement a VP could scan in 3 seconds. Lead with the subject. Example: "Bill Pay transactions miscategorized as personal expenses" not "Issue with categorization".
+
+**Description:** Write 2-4 sentences of clean, professional prose. Include: what happened, which customer, what the impact is, and any relevant context. No filler. No "the customer said...". Write as if briefing an executive.
+
+**Urgency guidelines:**
+- high: Customer is blocked, churning, or experiencing data/financial errors. Immediate attention required.
+- medium: Recurring friction, workflow inefficiency, or a clear gap affecting productivity.
+- low: Nice-to-have improvement, minor inconvenience, or low-frequency edge case.
 
 Return ONLY a valid JSON array (no markdown, no explanation). Each object must have exactly these fields:
 {
-  "type": "issue" | "praise" | "feature_request",
+  "type": "issue" | "praise" | "recommendation",
   "appType": "product" | "service" | "churn_risk",
-  "title": string (max 80 chars, descriptive),
-  "description": string (full context from the source),
+  "title": string (max 80 chars, crisp executive-readable statement),
+  "description": string (2-4 sentences of professional prose, no filler),
   "urgency": "low" | "medium" | "high",
-  "customer": string (customer company or person name, or "Unknown"),
+  "customer": string (customer company name, or "Unknown"),
   "rep": string (Zeni employee/rep name, or "Unknown"),
   "date": string (ISO date of the content, e.g. "2024-01-15"),
   "rawSourceId": string (the ID provided in the input),
@@ -225,7 +246,7 @@ async function analyzeChunk(
     return parsed.map((item) => ({
       id: uuidv4(),
       source: items.find((i) => i.id === item.rawSourceId)?.source ?? 'avoma',
-      type: (item.type as FeedbackType) ?? 'issue',
+      type: (['issue', 'praise', 'recommendation'].includes(item.type) ? item.type : 'issue') as FeedbackType,
       appType: (['product', 'service', 'churn_risk'].includes(item.appType) ? item.appType : 'product') as import('@/types').AppType,
       title: String(item.title ?? '').slice(0, 80),
       description: String(item.description ?? ''),
@@ -405,11 +426,11 @@ Format as clean markdown.`,
 3. Zeni reps receiving positive mentions
 4. Key differentiators worth highlighting
 Format as clean markdown.`,
-    feature_requests: `Analyze all feature requests. Include:
-1. Most requested features (by frequency)
-2. Customer context for each request
-3. Business impact assessment
-4. Suggested prioritization
+    feature_requests: `Analyze all customer recommendations. Include:
+1. Most requested improvements (by frequency)
+2. Customer context and business case for each
+3. Impact assessment
+4. Suggested prioritization for the product team
 Format as clean markdown.`,
     custom: request.customPrompt ?? 'Analyze the feedback data and provide insights.',
   }
