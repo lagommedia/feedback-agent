@@ -695,6 +695,7 @@ function FeedbackList() {
   const [users, setUsers] = useState<{ email: string }[]>([])
   const [assignedToFilter, setAssignedToFilter] = useState<string>('')
   const [companyFilter, setCompanyFilter] = useState<string>('')
+  const [sortBy, setSortBy] = useState<string>('date_desc')
   const [allCustomers, setAllCustomers] = useState<string[]>([])
   const [chargebeeCustomers, setChargebeeCustomers] = useState<ChargebeeCustomer[]>([])
 
@@ -832,6 +833,31 @@ function FeedbackList() {
     )
   }, [chargebeeCustomers, allCustomers])
 
+  const sortedItems = useMemo(() => {
+    const arr = [...items]
+    switch (sortBy) {
+      case 'date_asc':  return arr.sort((a, b) => a.date.localeCompare(b.date))
+      case 'date_desc': return arr.sort((a, b) => b.date.localeCompare(a.date))
+      case 'arr_desc': {
+        const getArr = (item: FeedbackItem) =>
+          chargebeeCustomers.find(c => c.companyName.toLowerCase() === item.customer.toLowerCase())?.arr ?? 0
+        return arr.sort((a, b) => getArr(b) - getArr(a))
+      }
+      case 'arr_asc': {
+        const getArr = (item: FeedbackItem) =>
+          chargebeeCustomers.find(c => c.companyName.toLowerCase() === item.customer.toLowerCase())?.arr ?? 0
+        return arr.sort((a, b) => getArr(a) - getArr(b))
+      }
+      case 'urgency': {
+        const order = { high: 0, medium: 1, low: 2 }
+        return arr.sort((a, b) => (order[a.urgency] ?? 1) - (order[b.urgency] ?? 1))
+      }
+      case 'company': return arr.sort((a, b) => a.customer.localeCompare(b.customer, undefined, { sensitivity: 'base' }))
+      default: return arr
+    }
+  }, [items, sortBy, chargebeeCustomers])
+
+
   return (
     <div className="p-8">
       <div className="mb-6">
@@ -923,6 +949,22 @@ function FeedbackList() {
             </SelectContent>
           </Select>
         </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-xs text-muted-foreground font-medium px-0.5">Sort By</span>
+          <Select value={sortBy} onValueChange={(v) => setSortBy(v ?? 'date_desc')}>
+            <SelectTrigger className="w-44">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="date_desc">Date (Newest)</SelectItem>
+              <SelectItem value="date_asc">Date (Oldest)</SelectItem>
+              <SelectItem value="arr_desc">ARR (High → Low)</SelectItem>
+              <SelectItem value="arr_asc">ARR (Low → High)</SelectItem>
+              <SelectItem value="urgency">Urgency</SelectItem>
+              <SelectItem value="company">Company (A–Z)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         {hasFilters && (
           <Button
             variant="ghost"
@@ -958,7 +1000,7 @@ function FeedbackList() {
         </Card>
       ) : (
         <div className="space-y-3">
-          {items.map((item) => (
+          {sortedItems.map((item) => (
             <Card key={item.id} className="overflow-hidden">
               <div
                 className="flex items-start gap-3 p-4 cursor-pointer hover:bg-muted/30 transition-colors"
