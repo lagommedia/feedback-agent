@@ -250,9 +250,10 @@ function CompanyFilter({
   const inputRef = useRef<HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  const filtered = options.filter((c) =>
-    c.toLowerCase().includes(query.toLowerCase())
-  ).slice(0, 50)
+  const filtered = options
+    .filter((c) => c.toLowerCase().includes(query.toLowerCase()))
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+    .slice(0, 50)
 
   useEffect(() => {
     if (open) {
@@ -822,10 +823,12 @@ function FeedbackList() {
   // Merge Chargebee canonical names (sorted by MRR) with any feedback customers
   // not found in Chargebee — so nothing disappears from the filter.
   const companyOptions = useMemo(() => {
-    if (chargebeeCustomers.length === 0) return allCustomers
+    if (chargebeeCustomers.length === 0) return [...allCustomers].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
     const cbSet = new Set(chargebeeCustomers.map((c) => c.companyName.toLowerCase()))
     const feedbackOnly = allCustomers.filter((c) => !cbSet.has(c.toLowerCase()))
-    return [...chargebeeCustomers.map((c) => c.companyName), ...feedbackOnly]
+    return [...chargebeeCustomers.map((c) => c.companyName), ...feedbackOnly].sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: 'base' })
+    )
   }, [chargebeeCustomers, allCustomers])
 
   return (
@@ -973,7 +976,8 @@ function FeedbackList() {
                     ))}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <div className="flex items-center gap-2">
                   {item.assignedTo && (
                     <span
                       className="hidden sm:flex items-center justify-center w-5 h-5 rounded-full bg-primary/20 text-primary text-[9px] font-bold shrink-0"
@@ -1015,6 +1019,13 @@ function FeedbackList() {
                   ) : (
                     <ChevronDown className="w-4 h-4 text-muted-foreground" />
                   )}
+                  </div>
+                  {(() => {
+                    const cb = chargebeeCustomers.find(c => c.companyName.toLowerCase() === item.customer.toLowerCase())
+                    if (!cb) return null
+                    const arr = cb.arr >= 1000 ? `$${(cb.arr / 1000).toFixed(1)}k` : `$${Math.round(cb.arr)}`
+                    return <span className="text-[10px] font-semibold text-blue-400">{arr} ARR</span>
+                  })()}
                 </div>
               </div>
 
@@ -1047,7 +1058,7 @@ function FeedbackList() {
                     {/* App row — spans 4 cols when in edit mode */}
                     {editing === item.id && editDraft ? (
                       <div className="col-span-2 sm:col-span-4">
-                        <p className="text-muted-foreground mb-1">Application</p>
+                        <p className="text-muted-foreground mb-1">Feedback Type</p>
                         <div className="flex flex-wrap gap-1.5">
                           {(Object.entries(APP_TYPES) as [AppType, string][]).map(([value, label]) => (
                             <button
@@ -1122,10 +1133,10 @@ function FeedbackList() {
                           {(() => {
                             const cb = chargebeeCustomers.find(c => c.companyName.toLowerCase() === item.customer.toLowerCase())
                             if (!cb) return null
-                            const mrr = cb.mrr >= 1000 ? `$${(cb.mrr / 1000).toFixed(1)}k` : `$${Math.round(cb.mrr)}`
+                            const arr = cb.arr >= 1000 ? `$${(cb.arr / 1000).toFixed(1)}k` : `$${Math.round(cb.arr)}`
                             return (
-                              <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                {mrr} MRR
+                              <span className="text-[10px] font-semibold text-blue-400">
+                                {arr} ARR
                               </span>
                             )
                           })()}

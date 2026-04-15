@@ -130,47 +130,17 @@ function SidebarInner() {
 
   return (
     <aside className="fixed left-0 top-0 h-screen w-60 bg-background border-r border-border flex flex-col z-30">
-      {/* App switcher */}
-      <div className="px-4 py-5 border-b border-border relative" ref={dropdownRef}>
-        <button
-          onClick={() => setOpen((o) => !o)}
-          className="w-full flex items-center gap-2.5 group"
-        >
+      {/* Header */}
+      <div className="px-4 py-5 border-b border-border">
+        <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center shrink-0">
             <BarChart3 className="w-4 h-4 text-primary-foreground" />
           </div>
-          <div className="flex-1 text-left min-w-0">
-            <p className="font-semibold text-sm leading-tight tracking-tight truncate">{currentAppLabel}</p>
+          <div>
+            <p className="font-semibold text-sm leading-tight tracking-tight">All Feedback</p>
             <p className="text-xs text-muted-foreground leading-tight">Zeni AI</p>
           </div>
-          <ChevronDown className={cn(
-            'w-4 h-4 text-muted-foreground shrink-0 transition-transform duration-150',
-            open && 'rotate-180'
-          )} />
-        </button>
-
-        {open && (
-          <div className="absolute left-3 right-3 top-full mt-1 bg-popover border border-border rounded-lg shadow-lg z-50 py-1 overflow-hidden">
-            {APP_OPTIONS.map(({ value, label }) => (
-              <button
-                key={value}
-                onClick={() => selectApp(value)}
-                className={cn(
-                  'w-full flex items-center gap-2.5 px-3 py-2 text-sm transition-colors text-left',
-                  value === currentApp
-                    ? 'text-foreground bg-muted/60'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
-                )}
-              >
-                <Check className={cn(
-                  'w-3.5 h-3.5 shrink-0',
-                  value === currentApp ? 'opacity-100' : 'opacity-0'
-                )} />
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
+        </div>
       </div>
 
       {/* Navigation */}

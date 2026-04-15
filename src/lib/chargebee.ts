@@ -68,10 +68,10 @@ export async function syncChargebeeCustomers(
 ): Promise<ChargebeeCustomer[]> {
   const base = BASE(site)
 
-  // Fetch active subscriptions and all customers in parallel
+  // Fetch subscriptions with all live statuses (active, in_trial, non_renewing) + all customers
   const [subscriptions, customers] = await Promise.all([
     fetchAllPages<ChSubscription>(
-      `${base}/subscriptions?limit=100&status%5Bis%5D=active`,
+      `${base}/subscriptions?limit=100&status%5Bin%5D%5B%5D=active&status%5Bin%5D%5B%5D=in_trial&status%5Bin%5D%5B%5D=non_renewing`,
       apiKey,
       'subscription',
     ),
