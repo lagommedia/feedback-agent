@@ -31,24 +31,40 @@ export default function IntegrationsPage() {
   const [chargebeeLastSynced, setChargebeeLastSynced] = useState<string | undefined>()
   const [saving, setSaving] = useState<string | null>(null)
 
-  // Load existing instructions from saved config on mount
+  // Load existing config on mount — masked keys are loaded into state so
+  // status checks work and Sync buttons stay enabled without re-entering keys.
   useEffect(() => {
     fetch('/api/integrations/config')
       .then((r) => r.json())
       .then(({ config }) => {
-        if (config?.avoma?.instructions) setAvoma((s) => ({ ...s, instructions: config.avoma.instructions }))
+        if (config?.avoma) {
+          setAvoma((s) => ({
+            ...s,
+            apiKey: config.avoma.apiKey ?? s.apiKey,
+            instructions: config.avoma.instructions ?? s.instructions,
+          }))
+        }
         if (config?.front) {
           setFront((s) => ({
             ...s,
+            bearerToken: config.front.bearerToken ?? s.bearerToken,
             instructions: config.front.instructions ?? s.instructions,
             internalEmails: (config.front.internalEmails ?? []).join('\n'),
             inboxIds: (config.front.inboxIds ?? []).join('\n'),
           }))
         }
-        if (config?.slack?.instructions) setSlack((s) => ({ ...s, instructions: config.slack.instructions }))
+        if (config?.slack) {
+          setSlack((s) => ({
+            ...s,
+            botToken: config.slack.botToken ?? s.botToken,
+            instructions: config.slack.instructions ?? s.instructions,
+            channelIds: (config.slack.channelIds ?? []).join('\n'),
+          }))
+        }
         if (config?.anthropic) {
           setAnthropic((s) => ({
             ...s,
+            apiKey: config.anthropic.apiKey ?? s.apiKey,
             instructions: config.anthropic.instructions ?? s.instructions,
             productInstructions: config.anthropic.productInstructions ?? s.productInstructions,
             serviceInstructions: config.anthropic.serviceInstructions ?? s.serviceInstructions,
@@ -58,6 +74,7 @@ export default function IntegrationsPage() {
         if (config?.chargebee) {
           setChargebee((s) => ({
             ...s,
+            apiKey: config.chargebee.apiKey ?? s.apiKey,
             site: config.chargebee.site ?? s.site,
             instructions: config.chargebee.instructions ?? s.instructions,
           }))
@@ -66,6 +83,11 @@ export default function IntegrationsPage() {
       })
       .catch(() => {/* silent */})
   }, [])
+
+  // Masked keys look like ****abcd — send '' so the backend keeps the stored value.
+  function unmasked(value: string): string {
+    return value.startsWith('****') ? '' : value
+  }
 
   async function saveConfig(
     integration: string,
@@ -126,7 +148,7 @@ export default function IntegrationsPage() {
           badge="Required"
           badgeVariant="destructive"
           onSave={() => saveConfig('anthropic', {
-            apiKey: anthropic.apiKey,
+            apiKey: unmasked(anthropic.apiKey),
             instructions: anthropic.instructions,
             productInstructions: anthropic.productInstructions,
             serviceInstructions: anthropic.serviceInstructions,
@@ -227,7 +249,7 @@ export default function IntegrationsPage() {
           instructions={avoma.instructions}
           instructionsPlaceholder="E.g. 'Only extract feedback from external customer calls. Ignore internal team syncs and recruiting calls.'"
           onInstructionsChange={(v) => setAvoma((s) => ({ ...s, instructions: v }))}
-          onSave={() => saveConfig('avoma', { apiKey: avoma.apiKey, instructions: avoma.instructions })}
+          onSave={() => saveConfig('avoma', { apiKey: unmasked(avoma.apiKey), instructions: avoma.instructions })}
           onSync={() => syncSource('avoma')}
           saving={saving === 'avoma'}
         >
@@ -260,7 +282,7 @@ export default function IntegrationsPage() {
           instructionsPlaceholder="E.g. 'Only extract feedback about the Zeni software product. Ignore billing disputes and general account inquiries.'"
           onInstructionsChange={(v) => setFront((s) => ({ ...s, instructions: v }))}
           onSave={() => saveConfig('front', {
-            bearerToken: front.bearerToken,
+            bearerToken: unmasked(front.bearerToken),
             instructions: front.instructions,
             internalEmails: front.internalEmails.split('\n').map((s) => s.trim()).filter(Boolean),
             inboxIds: front.inboxIds.split('\n').map((s) => s.trim()).filter(Boolean),
@@ -323,7 +345,7 @@ export default function IntegrationsPage() {
           instructionsPlaceholder="E.g. 'Flag customers who are on trial or have a past-due invoice as higher churn risk when their feedback is negative.'"
           onInstructionsChange={(v) => setChargebee((s) => ({ ...s, instructions: v }))}
           onSave={() => saveConfig('chargebee', {
-            apiKey: chargebee.apiKey,
+            apiKey: unmasked(chargebee.apiKey),
             site: chargebee.site,
             instructions: chargebee.instructions,
           })}
@@ -376,7 +398,7 @@ export default function IntegrationsPage() {
           onInstructionsChange={(v) => setSlack((s) => ({ ...s, instructions: v }))}
           onSave={() =>
             saveConfig('slack', {
-              botToken: slack.botToken,
+              botToken: unmasked(slack.botToken),
               channelIds: slack.channelIds.split('\n').map((s) => s.trim()).filter(Boolean),
               instructions: slack.instructions,
             })
