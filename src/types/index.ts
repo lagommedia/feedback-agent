@@ -170,6 +170,15 @@ export const TAGS_BY_APP_TYPE: Record<AppType, readonly string[]> = {
   churn_risk: CHURN_TAGS,
 }
 
+export interface ChargebeeCustomer {
+  customerId: string
+  companyName: string
+  email: string
+  mrr: number   // USD dollars
+  arr: number   // USD dollars
+  status: string
+}
+
 export type WorkflowStatus = 'reviewed' | 'action_plan' | 'in_progress' | 'completed'
 
 export interface ActionItem {

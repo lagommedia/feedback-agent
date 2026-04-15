@@ -15,7 +15,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { AlertCircle, ThumbsUp, Lightbulb, ChevronDown, ChevronUp, Search, Loader2, Pencil, Check, X as XIcon, MessageSquarePlus, ExternalLink, UserCircle, Building2 } from 'lucide-react'
-import type { FeedbackItem, FeedbackSource, FeedbackType, UrgencyLevel, AppType, WorkflowStatus, ActionItem } from '@/types'
+import type { FeedbackItem, FeedbackSource, FeedbackType, UrgencyLevel, AppType, WorkflowStatus, ActionItem, ChargebeeCustomer } from '@/types'
 import { PRODUCT_TAGS, SERVICE_TAGS, CHURN_TAGS, TAGS_BY_APP_TYPE, APP_TYPES } from '@/types'
 import { FeedbackDrawer } from '@/components/feedback/feedback-drawer'
 
@@ -694,11 +694,13 @@ function FeedbackList() {
   const [assignedToFilter, setAssignedToFilter] = useState<string>('')
   const [companyFilter, setCompanyFilter] = useState<string>('')
   const [allCustomers, setAllCustomers] = useState<string[]>([])
+  const [chargebeeCustomers, setChargebeeCustomers] = useState<ChargebeeCustomer[]>([])
 
   useEffect(() => {
     fetch('/api/auth/me').then(r => r.json()).then(d => setCurrentUser(d.email ?? null))
     fetch('/api/users').then(r => r.json()).then(d => setUsers(d.users ?? []))
     fetch('/api/feedback/customers').then(r => r.json()).then(d => setAllCustomers(d.customers ?? []))
+    fetch('/api/chargebee/customers').then(r => r.json()).then(d => setChargebeeCustomers(d.customers ?? []))
   }, [])
 
   function startEdit(item: FeedbackItem) {
@@ -855,7 +857,7 @@ function FeedbackList() {
         </div>
         <CompanyFilter
           value={companyFilter}
-          options={allCustomers}
+          options={chargebeeCustomers.length > 0 ? chargebeeCustomers.map(c => c.companyName) : allCustomers}
           onChange={setCompanyFilter}
         />
         <AssignedFilter
@@ -1106,7 +1108,19 @@ function FeedbackList() {
                           className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                         />
                       ) : (
-                        <p className="font-medium">{item.customer}</p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-medium">{item.customer}</p>
+                          {(() => {
+                            const cb = chargebeeCustomers.find(c => c.companyName.toLowerCase() === item.customer.toLowerCase())
+                            if (!cb) return null
+                            const mrr = cb.mrr >= 1000 ? `$${(cb.mrr / 1000).toFixed(1)}k` : `$${Math.round(cb.mrr)}`
+                            return (
+                              <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                {mrr} MRR
+                              </span>
+                            )
+                          })()}
+                        </div>
                       )}
                     </div>
                     <div>

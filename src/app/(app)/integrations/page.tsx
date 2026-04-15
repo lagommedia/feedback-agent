@@ -27,6 +27,8 @@ export default function IntegrationsPage() {
   const [slack, setSlack] = useState({ botToken: '', channelIds: '', instructions: '' })
   const [anthropic, setAnthropic] = useState({ apiKey: '', instructions: '', productInstructions: '', serviceInstructions: '', churnInstructions: '' })
   const [chargebee, setChargebee] = useState({ apiKey: '', site: '', instructions: '' })
+  const [chargebeeSyncing, setChargebeeSyncing] = useState(false)
+  const [chargebeeLastSynced, setChargebeeLastSynced] = useState<string | undefined>()
   const [saving, setSaving] = useState<string | null>(null)
 
   // Load existing instructions from saved config on mount
@@ -59,6 +61,7 @@ export default function IntegrationsPage() {
             site: config.chargebee.site ?? s.site,
             instructions: config.chargebee.instructions ?? s.instructions,
           }))
+          setChargebeeLastSynced(config.chargebee.lastSyncedAt)
         }
       })
       .catch(() => {/* silent */})
@@ -82,6 +85,21 @@ export default function IntegrationsPage() {
       toast.error(`Failed to save: ${String(err)}`)
     } finally {
       setSaving(null)
+    }
+  }
+
+  async function syncChargebee() {
+    setChargebeeSyncing(true)
+    try {
+      const res = await fetch('/api/integrations/chargebee/sync', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Sync failed')
+      toast.success(`Chargebee synced — ${data.count} active customers imported`)
+      setChargebeeLastSynced(new Date().toISOString())
+    } catch (err) {
+      toast.error(`Chargebee sync failed: ${String(err)}`)
+    } finally {
+      setChargebeeSyncing(false)
     }
   }
 
@@ -297,8 +315,10 @@ export default function IntegrationsPage() {
         {/* Chargebee */}
         <IntegrationCard
           name="Chargebee"
-          description="Subscription billing and customer data. Pull in subscription status, MRR, and churn signals to enrich your feedback with revenue context."
+          description="Subscription billing and customer data. Pull in active customers with MRR/ARR to power the company filter and enrich every feedback item with revenue context."
           status={!!chargebee.site && !!chargebee.apiKey}
+          lastSyncedAt={formatDate(chargebeeLastSynced)}
+          syncing={chargebeeSyncing}
           instructions={chargebee.instructions}
           instructionsPlaceholder="E.g. 'Flag customers who are on trial or have a past-due invoice as higher churn risk when their feedback is negative.'"
           onInstructionsChange={(v) => setChargebee((s) => ({ ...s, instructions: v }))}
@@ -307,6 +327,7 @@ export default function IntegrationsPage() {
             site: chargebee.site,
             instructions: chargebee.instructions,
           })}
+          onSync={syncChargebee}
           saving={saving === 'chargebee'}
         >
           <div className="space-y-3">

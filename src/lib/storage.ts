@@ -1,6 +1,7 @@
 import { Pool } from 'pg'
 import type {
   AvomaRawData,
+  ChargebeeCustomer,
   FeedbackStore,
   FrontRawData,
   IntegrationConfig,
@@ -105,6 +106,15 @@ async function ensureSchema(): Promise<void> {
       role TEXT NOT NULL,
       content TEXT NOT NULL,
       created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS chargebee_customers (
+      customer_id TEXT PRIMARY KEY,
+      company_name TEXT NOT NULL,
+      email TEXT NOT NULL DEFAULT '',
+      mrr NUMERIC NOT NULL DEFAULT 0,
+      arr NUMERIC NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'active',
+      synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `)
   _schemaReady = true
@@ -799,5 +809,43 @@ export async function getTrainingExamples(): Promise<TrainingExample[]> {
     feedbackTitle: r.feedback_title,
     feedbackDescription: r.feedback_description,
     createdAt: r.created_at,
+  }))
+}
+
+// ─── Chargebee Customers ─────────────────────────────────────────────────────
+
+export async function upsertChargebeeCustomers(customers: ChargebeeCustomer[]): Promise<void> {
+  await ensureSchema()
+  if (customers.length === 0) return
+  const pool = getPool()
+  for (const c of customers) {
+    await pool.query(
+      `INSERT INTO chargebee_customers (customer_id, company_name, email, mrr, arr, status, synced_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+       ON CONFLICT (customer_id) DO UPDATE SET
+         company_name = EXCLUDED.company_name,
+         email        = EXCLUDED.email,
+         mrr          = EXCLUDED.mrr,
+         arr          = EXCLUDED.arr,
+         status       = EXCLUDED.status,
+         synced_at    = EXCLUDED.synced_at`,
+      [c.customerId, c.companyName, c.email, c.mrr, c.arr, c.status],
+    )
+  }
+}
+
+export async function getChargebeeCustomers(): Promise<ChargebeeCustomer[]> {
+  await ensureSchema()
+  const pool = getPool()
+  const res = await pool.query(
+    'SELECT customer_id, company_name, email, mrr, arr, status FROM chargebee_customers ORDER BY mrr DESC',
+  )
+  return res.rows.map((r) => ({
+    customerId: r.customer_id,
+    companyName: r.company_name,
+    email: r.email,
+    mrr: parseFloat(r.mrr),
+    arr: parseFloat(r.arr),
+    status: r.status,
   }))
 }
