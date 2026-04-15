@@ -1,4 +1,5 @@
 import type { FrontRawConversation, FrontRawData, FrontRawMessage } from '@/types'
+import type { ChargebeeCustomer } from '@/lib/chargebee'
 
 const BASE_URL = 'https://api2.frontapp.com'
 
@@ -70,7 +71,29 @@ const AUTOMATED_SUBJECT_PATTERNS = [
   /^unsubscribe/i,
 ]
 
-function isCustomerConversation(convo: FrontRawConversation, internalEmails: string[]): boolean {
+function emailDomain(email: string): string {
+  return email.toLowerCase().split('@')[1] ?? ''
+}
+
+function buildChargebeeDomains(customers: ChargebeeCustomer[]): Set<string> {
+  const domains = new Set<string>()
+  for (const c of customers) {
+    if (c.email) {
+      const d = emailDomain(c.email)
+      // Exclude generic email providers — not useful for B2B matching
+      if (d && !['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com', 'aol.com', 'protonmail.com'].includes(d)) {
+        domains.add(d)
+      }
+    }
+  }
+  return domains
+}
+
+function isCustomerConversation(
+  convo: FrontRawConversation,
+  internalEmails: string[],
+  chargebeeDomains?: Set<string>,
+): boolean {
   const recipient = convo.recipient as Record<string, unknown> | undefined
   const handle = String((recipient?.handle as string) ?? '').toLowerCase()
   const name = String((recipient?.name as string) ?? '').toLowerCase()
@@ -91,6 +114,12 @@ function isCustomerConversation(convo: FrontRawConversation, internalEmails: str
   // Exclude conversations with no real recipient (system events)
   if (!handle || handle === '') return false
 
+  // If we have Chargebee domains, require the sender's domain to match a known customer
+  if (chargebeeDomains && chargebeeDomains.size > 0) {
+    const senderDomain = emailDomain(handle)
+    if (senderDomain && !chargebeeDomains.has(senderDomain)) return false
+  }
+
   return true
 }
 
@@ -98,7 +127,8 @@ async function fetchConversationPage(
   token: string,
   baseUrl: string,
   since: Date,
-  internalEmails: string[]
+  internalEmails: string[],
+  chargebeeDomains?: Set<string>,
 ): Promise<FrontRawConversation[]> {
   const conversations: FrontRawConversation[] = []
   const sinceTs = Math.floor(since.getTime() / 1000)
@@ -124,7 +154,7 @@ async function fetchConversationPage(
     // Use updated_at (last reply) not created_at (thread opened) so threads started before the
     // window but replied to within it are included
     const withinWindow = batch.filter(c => (c.updated_at ?? c.created_at ?? 0) >= sinceTs)
-    const customerBatch = withinWindow.filter(c => isCustomerConversation(c, internalEmails))
+    const customerBatch = withinWindow.filter(c => isCustomerConversation(c, internalEmails, chargebeeDomains))
     conversations.push(...customerBatch)
 
     if (withinWindow.length < batch.length) {
@@ -144,7 +174,8 @@ async function fetchAllConversations(
   token: string,
   since?: Date,
   internalEmails: string[] = [],
-  inboxIds: string[] = []
+  excludeInboxIds: string[] = [],
+  chargebeeCustomers: ChargebeeCustomer[] = [],
 ): Promise<FrontRawConversation[]> {
   const sinceDate = since ?? (() => {
     const d = new Date()
@@ -153,24 +184,30 @@ async function fetchAllConversations(
     return d
   })()
 
+  // Build Chargebee domain set for filtering — only conversations from known customer domains
+  const chargebeeDomains = chargebeeCustomers.length > 0
+    ? buildChargebeeDomains(chargebeeCustomers)
+    : undefined
+
+  console.log(`[Front] Chargebee domain filter: ${chargebeeDomains?.size ?? 0} known customer domains`)
+
   // Always use the global /conversations endpoint — it properly respects q[after]
-  // so pagination stops at the date boundary instead of fetching everything.
-  // If inboxIds are configured, apply them as a local post-filter.
-  const all = await fetchConversationPage(token, `${BASE_URL}/conversations`, sinceDate, internalEmails)
+  const all = await fetchConversationPage(token, `${BASE_URL}/conversations`, sinceDate, internalEmails, chargebeeDomains)
 
-  if (inboxIds.length === 0) return all
+  // Apply exclude inbox filter (post-filter — skip conversations from excluded inboxes)
+  if (excludeInboxIds.length === 0) return all
 
-  const inboxSet = new Set(inboxIds)
+  const excludeSet = new Set(excludeInboxIds)
   return all.filter(c => {
-    // The conversation object may have inbox_id or inboxes depending on API version.
     const raw = c as unknown as Record<string, unknown>
     const ids: string[] = []
     if (typeof raw.inbox_id === 'string') ids.push(raw.inbox_id)
     const inboxes = raw.inboxes as Array<{ id: string }> | undefined
     if (Array.isArray(inboxes)) inboxes.forEach(i => ids.push(i.id))
-    // If no inbox info, include it (over-include rather than miss)
+    // If no inbox info, include it
     if (ids.length === 0) return true
-    return ids.some(id => inboxSet.has(id))
+    // Exclude if any of the conversation's inboxes are in the exclude list
+    return !ids.some(id => excludeSet.has(id))
   })
 }
 
@@ -215,10 +252,11 @@ export async function syncFront(
   token: string,
   since?: Date,
   internalEmails: string[] = [],
-  inboxIds: string[] = [],
-  limit?: number  // cap how many conversations get messages fetched (for timeout safety)
+  excludeInboxIds: string[] = [],
+  limit?: number,  // cap how many conversations get messages fetched (for timeout safety)
+  chargebeeCustomers: ChargebeeCustomer[] = [],
 ): Promise<FrontRawData> {
-  const allConversations = await fetchAllConversations(token, since, internalEmails, inboxIds)
+  const allConversations = await fetchAllConversations(token, since, internalEmails, excludeInboxIds, chargebeeCustomers)
   // If a limit is set, take the most recently-updated conversations first
   const conversations = limit ? allConversations.slice(0, limit) : allConversations
 

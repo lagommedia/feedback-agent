@@ -325,7 +325,7 @@ export default function IntegrationsPage() {
               </p>
             </div>
             <div>
-              <Label htmlFor="front-inbox-ids">Inbox IDs to Sync (one per line)</Label>
+              <Label htmlFor="front-inbox-ids">Exclude Inbox IDs (one per line)</Label>
               <textarea
                 id="front-inbox-ids"
                 className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 min-h-[80px] font-mono"
@@ -334,7 +334,7 @@ export default function IntegrationsPage() {
                 onChange={(e) => setFront((s) => ({ ...s, inboxIds: e.target.value }))}
               />
               <p className="text-xs text-muted-foreground mt-1">
-                <strong>Recommended.</strong> Only sync conversations from these inboxes (e.g. Customer Success, Support). Leave blank to sync all inboxes. Find IDs in Front → Settings → Inboxes → click an inbox → copy the ID from the URL.
+                <strong>Optional.</strong> Conversations from these inboxes will be excluded (e.g. internal ops, billing). Leave blank to sync all inboxes. Find IDs in Front → Settings → Inboxes → click an inbox → copy the ID from the URL.
               </p>
             </div>
             <div>
