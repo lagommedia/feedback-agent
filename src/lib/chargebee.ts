@@ -7,7 +7,16 @@ export interface ChargebeeCustomer {
   status: string
 }
 
-const BASE = (site: string) => `https://${site}.chargebee.com/api/v2`
+// Accept full URL, subdomain only, or anything in between
+function normalizeSite(site: string): string {
+  return site
+    .trim()
+    .replace(/^https?:\/\//i, '')   // strip protocol
+    .replace(/\.chargebee\.com.*$/i, '')  // strip .chargebee.com suffix
+    .trim()
+}
+
+const BASE = (site: string) => `https://${normalizeSite(site)}.chargebee.com/api/v2`
 
 function authHeader(apiKey: string) {
   const encoded = Buffer.from(`${apiKey}:`).toString('base64')

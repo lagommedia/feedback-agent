@@ -115,7 +115,7 @@ export default function IntegrationsPage() {
     try {
       const res = await fetch('/api/integrations/chargebee/sync', { method: 'POST' })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error ?? 'Sync failed')
+      if (!res.ok) throw new Error([data.error, data.cause].filter(Boolean).join(' — '))
       toast.success(`Chargebee synced — ${data.count} active customers imported`)
       setChargebeeLastSynced(new Date().toISOString())
     } catch (err) {

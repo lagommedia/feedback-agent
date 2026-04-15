@@ -21,7 +21,13 @@ export async function POST() {
 
     return NextResponse.json({ status: 'success', count: customers.length })
   } catch (err) {
-    console.error('Chargebee sync error:', err)
-    return NextResponse.json({ status: 'error', error: String(err) }, { status: 500 })
+    const message = err instanceof Error ? err.message : String(err)
+    const cause = err instanceof Error ? (err as NodeJS.ErrnoException).cause : undefined
+    console.error('Chargebee sync error:', message, cause)
+    return NextResponse.json({
+      status: 'error',
+      error: message,
+      cause: cause ? String(cause) : undefined,
+    }, { status: 500 })
   }
 }
