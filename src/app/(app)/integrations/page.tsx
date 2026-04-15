@@ -29,6 +29,7 @@ export default function IntegrationsPage() {
   const [chargebee, setChargebee] = useState({ apiKey: '', site: '', instructions: '' })
   const [chargebeeSyncing, setChargebeeSyncing] = useState(false)
   const [chargebeeLastSynced, setChargebeeLastSynced] = useState<string | undefined>()
+  const [normalizing, setNormalizing] = useState(false)
   const [saving, setSaving] = useState<string | null>(null)
 
   // Load existing config on mount — masked keys are loaded into state so
@@ -107,6 +108,24 @@ export default function IntegrationsPage() {
       toast.error(`Failed to save: ${String(err)}`)
     } finally {
       setSaving(null)
+    }
+  }
+
+  async function normalizeCustomerNames() {
+    setNormalizing(true)
+    try {
+      const res = await fetch('/api/chargebee/normalize', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Normalization failed')
+      if (data.updated === 0) {
+        toast.success('All customer names already match Chargebee.')
+      } else {
+        toast.success(`Normalized ${data.updated} feedback item${data.updated !== 1 ? 's' : ''} to use Chargebee company names.`)
+      }
+    } catch (err) {
+      toast.error(`Normalization failed: ${String(err)}`)
+    } finally {
+      setNormalizing(false)
     }
   }
 
@@ -381,6 +400,31 @@ export default function IntegrationsPage() {
               </p>
             </div>
           </div>
+
+          {/* Normalize customer names */}
+          {chargebeeLastSynced && (
+            <div className="rounded-md border border-border bg-muted/20 p-3 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium">Normalize Customer Names</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Match existing feedback customer names to Chargebee's canonical company names using fuzzy matching. Run this after each sync.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={normalizeCustomerNames}
+                disabled={normalizing}
+                className="shrink-0"
+              >
+                {normalizing ? (
+                  <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Normalizing...</>
+                ) : (
+                  'Normalize Names'
+                )}
+              </Button>
+            </div>
+          )}
         </IntegrationCard>
 
         {/* Slack */}

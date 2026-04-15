@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Card, CardContent } from '@/components/ui/card'
@@ -819,6 +819,15 @@ function FeedbackList() {
 
   const hasFilters = !!(typeFilter || urgencyFilter || tagFilter || search || assignedToFilter || companyFilter)
 
+  // Merge Chargebee canonical names (sorted by MRR) with any feedback customers
+  // not found in Chargebee — so nothing disappears from the filter.
+  const companyOptions = useMemo(() => {
+    if (chargebeeCustomers.length === 0) return allCustomers
+    const cbSet = new Set(chargebeeCustomers.map((c) => c.companyName.toLowerCase()))
+    const feedbackOnly = allCustomers.filter((c) => !cbSet.has(c.toLowerCase()))
+    return [...chargebeeCustomers.map((c) => c.companyName), ...feedbackOnly]
+  }, [chargebeeCustomers, allCustomers])
+
   return (
     <div className="p-8">
       <div className="mb-6">
@@ -857,7 +866,7 @@ function FeedbackList() {
         </div>
         <CompanyFilter
           value={companyFilter}
-          options={chargebeeCustomers.length > 0 ? chargebeeCustomers.map(c => c.companyName) : allCustomers}
+          options={companyOptions}
           onChange={setCompanyFilter}
         />
         <AssignedFilter
