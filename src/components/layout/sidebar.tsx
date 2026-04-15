@@ -52,7 +52,7 @@ function SidebarShell() {
             <BarChart3 className="w-4 h-4 text-primary-foreground" />
           </div>
           <div>
-            <p className="font-semibold text-sm leading-tight tracking-tight">All Feedback</p>
+            <p className="font-semibold text-sm leading-tight tracking-tight">Feedback Agent</p>
             <p className="text-xs text-muted-foreground leading-tight">Zeni AI</p>
           </div>
         </div>
@@ -137,7 +137,7 @@ function SidebarInner() {
             <BarChart3 className="w-4 h-4 text-primary-foreground" />
           </div>
           <div>
-            <p className="font-semibold text-sm leading-tight tracking-tight">All Feedback</p>
+            <p className="font-semibold text-sm leading-tight tracking-tight">Feedback Agent</p>
             <p className="text-xs text-muted-foreground leading-tight">Zeni AI</p>
           </div>
         </div>
