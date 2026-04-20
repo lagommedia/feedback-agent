@@ -19,8 +19,16 @@ export function normalizeForMatch(name: string): string {
 function jaccardScore(a: string, b: string): number {
   if (a === b) return 1.0
 
+  // Space-collapsed match — handles "Team Bridge" vs "TeamBridge"
+  if (a.replace(/\s+/g, '') === b.replace(/\s+/g, '')) return 0.95
+
   // Substring containment — handles "Acme" matching "Acme Corp Solutions"
   if (a.includes(b) || b.includes(a)) return 0.85
+
+  // Space-collapsed substring — handles "Teambridge" containing "team" after collapse
+  const aCollapsed = a.replace(/\s+/g, '')
+  const bCollapsed = b.replace(/\s+/g, '')
+  if (aCollapsed.includes(bCollapsed) || bCollapsed.includes(aCollapsed)) return 0.8
 
   const wordsA = new Set(a.split(' ').filter((w) => w.length > 1))
   const wordsB = new Set(b.split(' ').filter((w) => w.length > 1))
