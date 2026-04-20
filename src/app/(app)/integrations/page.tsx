@@ -27,6 +27,7 @@ export default function IntegrationsPage() {
   const [slack, setSlack] = useState({ botToken: '', channelIds: '', instructions: '' })
   const [anthropic, setAnthropic] = useState({ apiKey: '', instructions: '', productInstructions: '', serviceInstructions: '', churnInstructions: '' })
   const [chargebee, setChargebee] = useState({ apiKey: '', site: '', instructions: '' })
+  const [churnRiskScore, setChurnRiskScore] = useState({ instructions: '' })
   const [chargebeeSyncing, setChargebeeSyncing] = useState(false)
   const [chargebeeLastSynced, setChargebeeLastSynced] = useState<string | undefined>()
   const [normalizing, setNormalizing] = useState(false)
@@ -80,6 +81,12 @@ export default function IntegrationsPage() {
             instructions: config.chargebee.instructions ?? s.instructions,
           }))
           setChargebeeLastSynced(config.chargebee.lastSyncedAt)
+        }
+        if (config?.churnRiskScore) {
+          setChurnRiskScore((s) => ({
+            ...s,
+            instructions: config.churnRiskScore!.instructions ?? s.instructions,
+          }))
         }
       })
       .catch(() => {/* silent */})
@@ -253,6 +260,54 @@ export default function IntegrationsPage() {
             </div>
           </div>
         </IntegrationCard>
+
+        {/* Churn Risk Score */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-md bg-red-500/10 flex items-center justify-center shrink-0">
+                <span className="text-red-400 text-sm font-bold">%</span>
+              </div>
+              <div>
+                <CardTitle className="text-base">Churn Risk Score</CardTitle>
+                <CardDescription className="text-xs mt-0.5">
+                  Define how the AI should calculate a churn risk score (0–100) for each company based on their feedback history.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label htmlFor="churn-risk-instructions">Scoring Instructions</Label>
+              <textarea
+                id="churn-risk-instructions"
+                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 min-h-[140px] resize-y"
+                placeholder={`E.g. 'Score each company 0–100 based on their feedback:\n• Start at 0\n• +30 for each high-urgency issue\n• +20 for churn_risk appType items\n• +10 for any unresolved issues older than 30 days\n• -10 for each recent praise\n• Cap at 100. Flag anything above 60 as high risk.'`}
+                value={churnRiskScore.instructions}
+                onChange={(e) => setChurnRiskScore((s) => ({ ...s, instructions: e.target.value }))}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                These instructions tell the AI how to weight issues, urgency, churn signals, and praises when computing a risk score per company.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              onClick={async () => {
+                setSaving('churnRiskScore')
+                try {
+                  await saveConfig('churnRiskScore', { instructions: churnRiskScore.instructions })
+                  toast.success('Churn Risk Score instructions saved')
+                } finally {
+                  setSaving(null)
+                }
+              }}
+              disabled={saving === 'churnRiskScore'}
+            >
+              {saving === 'churnRiskScore' ? <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> : null}
+              Save Instructions
+            </Button>
+          </CardContent>
+        </Card>
 
         <Separator />
 

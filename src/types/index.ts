@@ -32,6 +32,9 @@ export interface IntegrationConfig {
     lastSyncedAt?: string
     instructions?: string
   }
+  churnRiskScore?: {
+    instructions?: string
+  }
 }
 
 // ─── Raw Data Shapes ──────────────────────────────────────────────────────────
