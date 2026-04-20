@@ -1,15 +1,173 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import { FileText, Download, Loader2, Copy } from 'lucide-react'
+import { FileText, Download, Loader2, Copy, ChevronDown, ChevronUp, Users } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
-import type { ReportRequest } from '@/types'
+import type { ReportRequest, FeedbackItem, WorkflowStatus } from '@/types'
+
+const STAGE_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
+  reviewed:    { label: 'Reviewed',    color: 'text-violet-400',  bg: 'bg-violet-500/10 border border-violet-500/20' },
+  action_plan: { label: 'Action Plan', color: 'text-blue-400',    bg: 'bg-blue-500/10 border border-blue-500/20' },
+  in_progress: { label: 'In Progress', color: 'text-yellow-400',  bg: 'bg-yellow-500/10 border border-yellow-500/20' },
+  completed:   { label: 'Completed',   color: 'text-emerald-400', bg: 'bg-emerald-500/10 border border-emerald-500/20' },
+  none:        { label: 'Not Started', color: 'text-muted-foreground', bg: 'bg-muted/40' },
+}
+
+const URGENCY_COLOR: Record<string, string> = {
+  high: 'text-red-400', medium: 'text-yellow-400', low: 'text-muted-foreground',
+}
+
+function TeamAssignmentsPanel() {
+  const [items, setItems] = useState<FeedbackItem[]>([])
+  const [companyAssignments, setCompanyAssignments] = useState<Record<string, string>>({})
+  const [loading, setLoading] = useState(true)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/feedback?limit=2000').then(r => r.json()),
+      fetch('/api/company-assignments').then(r => r.json()),
+    ]).then(([fd, ca]) => {
+      setItems((fd.items ?? []).filter((i: FeedbackItem) => i.assignedTo))
+      setCompanyAssignments(ca.assignments ?? {})
+    }).finally(() => setLoading(false))
+  }, [])
+
+  function toggle(email: string) {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      next.has(email) ? next.delete(email) : next.add(email)
+      return next
+    })
+  }
+
+  // Group tickets by assignee
+  const byAssignee = new Map<string, FeedbackItem[]>()
+  for (const item of items) {
+    const key = item.assignedTo!
+    if (!byAssignee.has(key)) byAssignee.set(key, [])
+    byAssignee.get(key)!.push(item)
+  }
+
+  // Also gather company-level assignments
+  const companiesByAssignee = new Map<string, string[]>()
+  for (const [company, email] of Object.entries(companyAssignments)) {
+    if (!companiesByAssignee.has(email)) companiesByAssignee.set(email, [])
+    companiesByAssignee.get(email)!.push(company)
+  }
+
+  // All unique assignees across both
+  const allAssignees = [...new Set([...byAssignee.keys(), ...companiesByAssignee.keys()])].sort()
+
+  const stageCounts = (ticketList: FeedbackItem[]) => {
+    const counts: Record<string, number> = { none: 0, reviewed: 0, action_plan: 0, in_progress: 0, completed: 0 }
+    for (const t of ticketList) counts[t.workflowStatus ?? 'none']++
+    return counts
+  }
+
+  if (loading) return (
+    <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+      <Loader2 className="w-4 h-4 animate-spin" /> Loading team assignments…
+    </div>
+  )
+
+  if (allAssignees.length === 0) return (
+    <p className="text-sm text-muted-foreground py-4">No tickets or companies have been assigned yet.</p>
+  )
+
+  return (
+    <div className="space-y-2">
+      {allAssignees.map(email => {
+        const tickets = byAssignee.get(email) ?? []
+        const companies = companiesByAssignee.get(email) ?? []
+        const isOpen = expanded.has(email)
+        const counts = stageCounts(tickets)
+        const initials = email.slice(0, 2).toUpperCase()
+
+        return (
+          <div key={email} className="rounded-lg border border-border overflow-hidden">
+            {/* Assignee header */}
+            <div
+              className="flex items-center gap-3 px-4 py-3 bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer"
+              onClick={() => toggle(email)}
+            >
+              <span className="w-8 h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold shrink-0">
+                {initials}
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold truncate">{email}</p>
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                  <span className="text-xs text-muted-foreground">{tickets.length} ticket{tickets.length !== 1 ? 's' : ''}</span>
+                  {companies.length > 0 && (
+                    <span className="text-xs text-muted-foreground">· {companies.length} company account{companies.length !== 1 ? 's' : ''}</span>
+                  )}
+                  {/* Stage pill summary */}
+                  {Object.entries(counts).filter(([, n]) => n > 0).map(([stage, n]) => (
+                    <span key={stage} className={cn('inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold', STAGE_CONFIG[stage].bg, STAGE_CONFIG[stage].color)}>
+                      {n} {STAGE_CONFIG[stage].label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              {isOpen ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />}
+            </div>
+
+            {/* Expanded content */}
+            {isOpen && (
+              <div className="divide-y divide-border">
+                {/* Company accounts */}
+                {companies.length > 0 && (
+                  <div className="px-4 py-3 bg-muted/10">
+                    <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Company Accounts</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {companies.map(c => (
+                        <span key={c} className="inline-flex items-center rounded-full px-2 py-0.5 text-xs bg-muted/60 text-foreground">{c}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* Tickets */}
+                {tickets.length > 0 && (
+                  <div>
+                    <div className="px-4 pt-3 pb-1">
+                      <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Tickets</p>
+                    </div>
+                    {tickets.map(ticket => {
+                      const stage = ticket.workflowStatus ?? 'none'
+                      const stageConf = STAGE_CONFIG[stage]
+                      return (
+                        <div key={ticket.id} className="flex items-start gap-3 px-4 py-2.5 hover:bg-muted/20 transition-colors">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{ticket.title}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {ticket.customer}{ticket.rep !== 'Unknown' ? ` · ${ticket.rep}` : ''} · {ticket.date}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className={cn('text-xs font-medium', URGENCY_COLOR[ticket.urgency])}>{ticket.urgency}</span>
+                            <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold', stageConf.bg, stageConf.color)}>
+                              {stageConf.label}
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 const REPORT_TYPES: { value: ReportRequest['type']; label: string; description: string }[] = [
   {
@@ -113,6 +271,20 @@ export default function ReportsPage() {
         <p className="text-muted-foreground mt-1">
           Generate AI-powered reports from your product feedback data
         </p>
+      </div>
+
+      {/* Team Assignments */}
+      <div className="mb-10">
+        <div className="flex items-center gap-2 mb-4">
+          <Users className="w-5 h-5 text-primary" />
+          <h2 className="text-lg font-semibold">Team Assignments</h2>
+        </div>
+        <TeamAssignmentsPanel />
+      </div>
+
+      <div className="mb-6">
+        <h2 className="text-lg font-semibold">AI Reports</h2>
+        <p className="text-sm text-muted-foreground mt-0.5">Generate AI-powered analysis from your feedback data</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
