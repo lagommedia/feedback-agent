@@ -877,6 +877,7 @@ function FeedbackList() {
   const [typeFilter, setTypeFilter] = useState<string>(searchParams.get('type') ?? '')
   const [urgencyFilter, setUrgencyFilter] = useState<string>(searchParams.get('urgency') ?? '')
   const [tagFilter, setTagFilter] = useState<string>(searchParams.get('tag') ?? '')
+  const [appTypeFilter, setAppTypeFilter] = useState<string>(searchParams.get('app') ?? '')
 
   const fetchItems = useCallback(async () => {
     setLoading(true)
@@ -898,6 +899,7 @@ function FeedbackList() {
       if (companyFilter) params.set('customer', companyFilter)
     }
     if (appParam) params.set('appType', appParam)
+    if (appTypeFilter) params.set('appType', appTypeFilter)
     params.set('limit', '100')
 
     try {
@@ -910,14 +912,14 @@ function FeedbackList() {
     } finally {
       setLoading(false)
     }
-  }, [idParam, isDateView, fromParam, toParam, search, typeFilter, urgencyFilter, tagFilter, assignedToFilter, companyFilter, appParam, searchParams])
+  }, [idParam, isDateView, fromParam, toParam, search, typeFilter, urgencyFilter, tagFilter, appTypeFilter, assignedToFilter, companyFilter, appParam, searchParams])
 
   useEffect(() => {
     const t = setTimeout(fetchItems, 200)
     return () => clearTimeout(t)
   }, [fetchItems])
 
-  const hasFilters = !!(typeFilter || urgencyFilter || tagFilter || search || assignedToFilter || companyFilter)
+  const hasFilters = !!(typeFilter || urgencyFilter || tagFilter || appTypeFilter || search || assignedToFilter || companyFilter)
 
   // Fuzzy lookup map: feedback customer name → matched ChargebeeCustomer (or null)
   // Built once when chargebeeCustomers loads, so we don't re-run fuzzy match on every render.
@@ -1032,18 +1034,16 @@ function FeedbackList() {
           onChange={setAssignedToFilter}
         />
         <div className="flex flex-col gap-1">
-          <span className="text-xs text-muted-foreground font-medium px-0.5">
-            {appParam === 'service' ? 'Service Areas' : appParam === 'churn_risk' ? 'Churn Reasons' : 'Product Areas'}
-          </span>
-          <Select value={tagFilter} onValueChange={(v) => setTagFilter(v ?? '')}>
+          <span className="text-xs text-muted-foreground font-medium px-0.5">Application</span>
+          <Select value={appTypeFilter} onValueChange={(v) => setAppTypeFilter(v ?? '')}>
             <SelectTrigger className="w-44">
-              <SelectValue placeholder={appParam === 'service' ? 'All Service Areas' : appParam === 'churn_risk' ? 'All Churn Reasons' : 'All Product Areas'} />
+              <SelectValue placeholder="All Applications" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">{appParam === 'service' ? 'All Service Areas' : appParam === 'churn_risk' ? 'All Churn Reasons' : 'All Product Areas'}</SelectItem>
-              {(appParam === 'service' ? SERVICE_TAGS : appParam === 'churn_risk' ? CHURN_TAGS : PRODUCT_TAGS).map((tag) => (
-                <SelectItem key={tag} value={tag}>{tag}</SelectItem>
-              ))}
+              <SelectItem value="">All Applications</SelectItem>
+              <SelectItem value="product">Product</SelectItem>
+              <SelectItem value="service">Service</SelectItem>
+              <SelectItem value="churn_risk">Churn Risk</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -1079,7 +1079,9 @@ function FeedbackList() {
           <span className="text-xs text-muted-foreground font-medium px-0.5">Sort By</span>
           <Select value={sortBy} onValueChange={(v) => setSortBy(v ?? 'date_desc')}>
             <SelectTrigger className="w-44">
-              <SelectValue />
+              <SelectValue placeholder="Date (Newest)">
+                {({'date_desc': 'Date (Newest)', 'date_asc': 'Date (Oldest)', 'arr_desc': 'ARR (High → Low)', 'arr_asc': 'ARR (Low → High)', 'urgency': 'Urgency', 'company': 'Company (A–Z)' } as Record<string, string>)[sortBy] ?? 'Date (Newest)'}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="date_desc">Date (Newest)</SelectItem>
@@ -1100,6 +1102,7 @@ function FeedbackList() {
               setTypeFilter('')
               setUrgencyFilter('')
               setTagFilter('')
+              setAppTypeFilter('')
               setAssignedToFilter('')
               setCompanyFilter('')
             }}
