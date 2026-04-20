@@ -116,6 +116,11 @@ async function ensureSchema(): Promise<void> {
       status TEXT NOT NULL DEFAULT 'active',
       synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS company_assignments (
+      company_name TEXT PRIMARY KEY,
+      assigned_to TEXT NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
   `)
   _schemaReady = true
 }
@@ -830,6 +835,30 @@ export async function upsertChargebeeCustomers(customers: ChargebeeCustomer[]): 
          status       = EXCLUDED.status,
          synced_at    = EXCLUDED.synced_at`,
       [c.customerId, c.companyName, c.email, c.mrr, c.arr, c.status],
+    )
+  }
+}
+
+export async function getCompanyAssignments(): Promise<Record<string, string>> {
+  await ensureSchema()
+  const pool = getPool()
+  const res = await pool.query('SELECT company_name, assigned_to FROM company_assignments')
+  const map: Record<string, string> = {}
+  for (const r of res.rows) map[r.company_name] = r.assigned_to
+  return map
+}
+
+export async function setCompanyAssignment(companyName: string, assignedTo: string | null): Promise<void> {
+  await ensureSchema()
+  const pool = getPool()
+  if (!assignedTo) {
+    await pool.query('DELETE FROM company_assignments WHERE company_name = $1', [companyName])
+  } else {
+    await pool.query(
+      `INSERT INTO company_assignments (company_name, assigned_to, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (company_name) DO UPDATE SET assigned_to = EXCLUDED.assigned_to, updated_at = NOW()`,
+      [companyName, assignedTo],
     )
   }
 }

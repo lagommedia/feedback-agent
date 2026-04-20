@@ -237,6 +237,76 @@ function AssigneeSelector({
   )
 }
 
+function CompanyAssignWidget({
+  company,
+  assignedTo,
+  users,
+  onAssign,
+}: {
+  company: string
+  assignedTo: string | null
+  users: { email: string }[]
+  onAssign: (company: string, assignedTo: string | null) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  return (
+    <div ref={ref} className="relative" onClick={e => e.stopPropagation()}>
+      {assignedTo ? (
+        <div className="flex items-center gap-1">
+          <span
+            className="flex items-center justify-center w-6 h-6 rounded-full bg-violet-500/20 text-violet-400 text-[9px] font-bold cursor-pointer hover:bg-violet-500/30 transition-colors"
+            title={`Company assigned to ${assignedTo}`}
+            onClick={() => setOpen(o => !o)}
+          >
+            {assignedTo.slice(0, 2).toUpperCase()}
+          </span>
+        </div>
+      ) : (
+        <button
+          onClick={() => setOpen(o => !o)}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-border text-xs text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
+        >
+          <UserCircle className="w-3 h-3" /> Assign
+        </button>
+      )}
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-52 bg-popover border border-border rounded-lg shadow-lg z-50 py-1 max-h-48 overflow-y-auto">
+          {assignedTo && (
+            <button
+              onClick={() => { onAssign(company, null); setOpen(false) }}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left text-destructive hover:bg-muted/50 transition-colors"
+            >
+              <XIcon className="w-3 h-3" /> Remove assignment
+            </button>
+          )}
+          {users.map(u => (
+            <button
+              key={u.email}
+              onClick={() => { onAssign(company, u.email); setOpen(false) }}
+              className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-muted/50 transition-colors ${u.email === assignedTo ? 'text-primary font-medium' : ''}`}
+            >
+              <span className="w-5 h-5 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[9px] font-bold shrink-0">
+                {u.email.slice(0, 2).toUpperCase()}
+              </span>
+              {u.email}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function CompanyFilter({
   value,
   options,
@@ -687,6 +757,7 @@ function FeedbackList() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState<string | null>(idParam)
+  const [expandedCompanies, setExpandedCompanies] = useState<Set<string>>(new Set())
   const [editing, setEditing] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState<{ type: FeedbackType; appType: AppType; customer: string; rep: string; tags: string[] } | null>(null)
   const [saving, setSaving] = useState(false)
@@ -698,13 +769,38 @@ function FeedbackList() {
   const [sortBy, setSortBy] = useState<string>('date_desc')
   const [allCustomers, setAllCustomers] = useState<string[]>([])
   const [chargebeeCustomers, setChargebeeCustomers] = useState<ChargebeeCustomer[]>([])
+  const [companyAssignments, setCompanyAssignments] = useState<Record<string, string>>({})
 
   useEffect(() => {
     fetch('/api/auth/me').then(r => r.json()).then(d => setCurrentUser(d.email ?? null))
     fetch('/api/users').then(r => r.json()).then(d => setUsers(d.users ?? []))
     fetch('/api/feedback/customers').then(r => r.json()).then(d => setAllCustomers(d.customers ?? []))
     fetch('/api/chargebee/customers').then(r => r.json()).then(d => setChargebeeCustomers(d.customers ?? []))
+    fetch('/api/company-assignments').then(r => r.json()).then(d => setCompanyAssignments(d.assignments ?? {}))
   }, [])
+
+  function toggleCompany(company: string) {
+    setExpandedCompanies(prev => {
+      const next = new Set(prev)
+      if (next.has(company)) next.delete(company)
+      else next.add(company)
+      return next
+    })
+  }
+
+  async function assignCompany(companyName: string, assignedTo: string | null) {
+    await fetch('/api/company-assignments', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ companyName, assignedTo }),
+    })
+    setCompanyAssignments(prev => {
+      const next = { ...prev }
+      if (!assignedTo) delete next[companyName]
+      else next[companyName] = assignedTo
+      return next
+    })
+  }
 
   function startEdit(item: FeedbackItem) {
     setEditing(item.id)
@@ -857,6 +953,20 @@ function FeedbackList() {
     }
   }, [items, sortBy, chargebeeCustomers])
 
+  // Group sorted items by company
+  const groupedByCompany = useMemo(() => {
+    const map = new Map<string, FeedbackItem[]>()
+    for (const item of sortedItems) {
+      const key = item.customer || 'Unknown'
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(item)
+    }
+    return Array.from(map.entries()).map(([company, companyItems]) => ({
+      company,
+      items: companyItems,
+      cb: chargebeeCustomers.find(c => c.companyName.toLowerCase() === company.toLowerCase()),
+    }))
+  }, [sortedItems, chargebeeCustomers])
 
   return (
     <div className="p-8">
@@ -1000,77 +1110,86 @@ function FeedbackList() {
         </Card>
       ) : (
         <div className="space-y-3">
-          {sortedItems.map((item) => (
-            <Card key={item.id} className="overflow-hidden">
-              <div
-                className="flex items-start gap-3 p-4 cursor-pointer hover:bg-muted/30 transition-colors"
-                onClick={() => setExpanded(expanded === item.id ? null : item.id)}
-              >
-                <div className="mt-0.5 shrink-0">{typeIcon(item.type)}</div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">{item.title}</p>
-                  <div className="flex items-center gap-2 mt-1 flex-wrap">
-                    <p className="text-xs text-muted-foreground">
-                      {item.customer}
-                      {item.rep !== 'Unknown' ? ` · ${item.rep}` : ''} · {item.date}
-                    </p>
-                    {(item.tags ?? []).map((tag) => (
-                      <TagBadge key={tag} tag={tag} />
-                    ))}
+          {groupedByCompany.map(({ company, items: companyItems, cb }) => {
+            const isCompanyExpanded = expandedCompanies.has(company)
+            const arrStr = cb ? (cb.arr >= 1000 ? `$${(cb.arr / 1000).toFixed(1)}k` : `$${Math.round(cb.arr)}`) : null
+            const companyAssignee = companyAssignments[company]
+            return (
+              <div key={company} className="rounded-lg border border-border overflow-hidden">
+                {/* Company header */}
+                <div
+                  className="flex items-center gap-3 px-4 py-3 bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer"
+                  onClick={() => toggleCompany(company)}
+                >
+                  <Building2 className="w-4 h-4 text-muted-foreground shrink-0" />
+                  <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-sm">{company}</span>
+                    {arrStr && <span className="text-[11px] font-semibold text-blue-400">{arrStr} ARR</span>}
+                    <span className="text-xs text-muted-foreground">{companyItems.length} ticket{companyItems.length !== 1 ? 's' : ''}</span>
                   </div>
+                  {/* Company-level assignee */}
+                  <CompanyAssignWidget
+                    company={company}
+                    assignedTo={companyAssignee ?? null}
+                    users={users}
+                    onAssign={assignCompany}
+                  />
+                  {isCompanyExpanded
+                    ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" />
+                    : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />}
                 </div>
-                <div className="flex flex-col items-end gap-1 shrink-0">
-                  <div className="flex items-center gap-2">
-                  {item.assignedTo && (
-                    <span
-                      className="hidden sm:flex items-center justify-center w-5 h-5 rounded-full bg-primary/20 text-primary text-[9px] font-bold shrink-0"
-                      title={`Assigned to ${item.assignedTo}`}
-                    >
-                      {item.assignedTo.slice(0, 2).toUpperCase()}
-                    </span>
-                  )}
-                  {!appParam && (
-                    <AppTypeBadge appType={item.appType} />
-                  )}
-                  {(() => {
-                    const src = SOURCE_LOGOS[item.source]
-                    const url = buildSourceUrl(item)
-                    return src ? (
-                      url ? (
-                        <a
-                          href={url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title={src.alt}
-                          className="hidden sm:flex shrink-0"
+
+                {/* Tickets nested under company */}
+                {isCompanyExpanded && (
+                  <div className="divide-y divide-border">
+                    {companyItems.map((item) => (
+                      <div key={item.id}>
+                        <div
+                          className="flex items-start gap-3 px-4 py-3 cursor-pointer hover:bg-muted/20 transition-colors"
+                          onClick={() => setExpanded(expanded === item.id ? null : item.id)}
                         >
-                          <img src={src.logo} alt={src.alt} width={16} height={16} className="rounded-sm opacity-80 hover:opacity-100 transition-opacity" />
-                        </a>
-                      ) : (
-                        <img src={src.logo} alt={src.alt} width={16} height={16} className="hidden sm:block rounded-sm opacity-80" />
-                      )
-                    ) : null
-                  })()}
-                  <Badge variant="outline" className="text-xs hidden sm:flex">
-                    {typeLabel(item.type)}
-                  </Badge>
-                  <Badge variant={urgencyColor(item.urgency)} className="text-xs">
-                    {item.urgency}
-                  </Badge>
-                  {expanded === item.id ? (
-                    <ChevronUp className="w-4 h-4 text-muted-foreground" />
-                  ) : (
-                    <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                  )}
-                  </div>
-                  {(() => {
-                    const cb = chargebeeCustomers.find(c => c.companyName.toLowerCase() === item.customer.toLowerCase())
-                    if (!cb) return null
-                    const arr = cb.arr >= 1000 ? `$${(cb.arr / 1000).toFixed(1)}k` : `$${Math.round(cb.arr)}`
-                    return <span className="text-[10px] font-semibold text-blue-400">{arr} ARR</span>
-                  })()}
-                </div>
-              </div>
+                          <div className="mt-0.5 shrink-0">{typeIcon(item.type)}</div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium">{item.title}</p>
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              <p className="text-xs text-muted-foreground">
+                                {item.rep !== 'Unknown' ? `${item.rep} · ` : ''}{item.date}
+                              </p>
+                              {(item.tags ?? []).map((tag) => (
+                                <TagBadge key={tag} tag={tag} />
+                              ))}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {item.assignedTo && (
+                              <span
+                                className="hidden sm:flex items-center justify-center w-5 h-5 rounded-full bg-primary/20 text-primary text-[9px] font-bold shrink-0"
+                                title={`Assigned to ${item.assignedTo}`}
+                              >
+                                {item.assignedTo.slice(0, 2).toUpperCase()}
+                              </span>
+                            )}
+                            {!appParam && <AppTypeBadge appType={item.appType} />}
+                            {(() => {
+                              const src = SOURCE_LOGOS[item.source]
+                              const url = buildSourceUrl(item)
+                              return src ? (
+                                url ? (
+                                  <a href={url} target="_blank" rel="noopener noreferrer" title={src.alt} className="hidden sm:flex shrink-0" onClick={e => e.stopPropagation()}>
+                                    <img src={src.logo} alt={src.alt} width={16} height={16} className="rounded-sm opacity-80 hover:opacity-100 transition-opacity" />
+                                  </a>
+                                ) : (
+                                  <img src={src.logo} alt={src.alt} width={16} height={16} className="hidden sm:block rounded-sm opacity-80" />
+                                )
+                              ) : null
+                            })()}
+                            <Badge variant="outline" className="text-xs hidden sm:flex">{typeLabel(item.type)}</Badge>
+                            <Badge variant={urgencyColor(item.urgency)} className="text-xs">{item.urgency}</Badge>
+                            {expanded === item.id
+                              ? <ChevronUp className="w-4 h-4 text-muted-foreground" />
+                              : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+                          </div>
+                        </div>
 
               {expanded === item.id && (
                 <div className="border-t bg-muted/20 px-4 py-4">
@@ -1269,9 +1388,13 @@ function FeedbackList() {
                     </button>
                   </div>
                 </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               )}
-            </Card>
-          ))}
+            </div>
+          )})}
         </div>
       )}
 
