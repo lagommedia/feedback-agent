@@ -28,6 +28,7 @@ function TeamAssignmentsPanel() {
   const [companyAssignments, setCompanyAssignments] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [expandedTickets, setExpandedTickets] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     Promise.all([
@@ -43,6 +44,14 @@ function TeamAssignmentsPanel() {
     setExpanded(prev => {
       const next = new Set(prev)
       next.has(email) ? next.delete(email) : next.add(email)
+      return next
+    })
+  }
+
+  function toggleTicket(id: string) {
+    setExpandedTickets(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
       return next
     })
   }
@@ -141,20 +150,58 @@ function TeamAssignmentsPanel() {
                     {tickets.map(ticket => {
                       const stage = ticket.workflowStatus ?? 'none'
                       const stageConf = STAGE_CONFIG[stage]
+                      const isTicketOpen = expandedTickets.has(ticket.id)
                       return (
-                        <div key={ticket.id} className="flex items-start gap-3 px-4 py-2.5 hover:bg-muted/20 transition-colors">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">{ticket.title}</p>
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              {ticket.customer}{ticket.rep !== 'Unknown' ? ` · ${ticket.rep}` : ''} · {ticket.date}
-                            </p>
+                        <div key={ticket.id} className="border-t border-border/50 first:border-t-0">
+                          {/* Ticket summary row */}
+                          <div
+                            className="flex items-start gap-3 px-4 py-2.5 cursor-pointer hover:bg-muted/20 transition-colors"
+                            onClick={() => toggleTicket(ticket.id)}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium">{ticket.title}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                {ticket.customer}{ticket.rep !== 'Unknown' ? ` · ${ticket.rep}` : ''} · {ticket.date}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className={cn('text-xs font-medium', URGENCY_COLOR[ticket.urgency])}>{ticket.urgency}</span>
+                              <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold', stageConf.bg, stageConf.color)}>
+                                {stageConf.label}
+                              </span>
+                              {isTicketOpen
+                                ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" />
+                                : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <span className={cn('text-xs font-medium', URGENCY_COLOR[ticket.urgency])}>{ticket.urgency}</span>
-                            <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold', stageConf.bg, stageConf.color)}>
-                              {stageConf.label}
-                            </span>
-                          </div>
+                          {/* Expanded ticket detail */}
+                          {isTicketOpen && (
+                            <div className="px-4 pb-3 pt-0 bg-muted/10 border-t border-border/40">
+                              {ticket.description && (
+                                <p className="text-sm text-foreground/80 leading-relaxed mb-2">{ticket.description}</p>
+                              )}
+                              <div className="flex flex-wrap items-center gap-2">
+                                {(ticket.tags ?? []).map(tag => (
+                                  <span key={tag} className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium bg-muted/60 text-muted-foreground">{tag}</span>
+                                ))}
+                                {ticket.reviewedNotes && (
+                                  <span className="text-xs text-muted-foreground italic">Notes: {ticket.reviewedNotes}</span>
+                                )}
+                              </div>
+                              {(ticket.actionItems ?? []).length > 0 && (
+                                <div className="mt-2 space-y-1">
+                                  {ticket.actionItems!.map(ai => (
+                                    <div key={ai.id} className="flex items-center gap-2 text-xs">
+                                      <span className={ai.checked ? 'text-emerald-400' : 'text-muted-foreground'}>
+                                        {ai.checked ? '✓' : '○'}
+                                      </span>
+                                      <span className={ai.checked ? 'line-through text-muted-foreground' : ''}>{ai.text}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )
                     })}
