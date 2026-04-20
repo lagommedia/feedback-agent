@@ -18,6 +18,7 @@ import { AlertCircle, ThumbsUp, Lightbulb, ChevronDown, ChevronUp, Search, Loade
 import type { FeedbackItem, FeedbackSource, FeedbackType, UrgencyLevel, AppType, WorkflowStatus, ActionItem, ChargebeeCustomer } from '@/types'
 import { PRODUCT_TAGS, SERVICE_TAGS, CHURN_TAGS, TAGS_BY_APP_TYPE, APP_TYPES } from '@/types'
 import { FeedbackDrawer } from '@/components/feedback/feedback-drawer'
+import { bestChargebeeMatch } from '@/lib/name-match'
 
 const SOURCE_LOGOS: Record<string, { logo: string; alt: string }> = {
   avoma: { logo: 'https://www.google.com/s2/favicons?domain=avoma.com&sz=32', alt: 'Avoma' },
@@ -918,6 +919,23 @@ function FeedbackList() {
 
   const hasFilters = !!(typeFilter || urgencyFilter || tagFilter || search || assignedToFilter || companyFilter)
 
+  // Fuzzy lookup map: feedback customer name → matched ChargebeeCustomer (or null)
+  // Built once when chargebeeCustomers loads, so we don't re-run fuzzy match on every render.
+  const cbLookup = useMemo(() => {
+    const map = new Map<string, ChargebeeCustomer | null>()
+    if (chargebeeCustomers.length === 0) return map
+    const cbNames = chargebeeCustomers.map(c => c.companyName)
+    const uniqueCustomers = [...new Set(items.map(i => i.customer))]
+    for (const name of uniqueCustomers) {
+      // Try exact match first, then fuzzy
+      const exact = chargebeeCustomers.find(c => c.companyName.toLowerCase() === name.toLowerCase())
+      if (exact) { map.set(name, exact); continue }
+      const fuzzyName = bestChargebeeMatch(name, cbNames, 0.6)
+      map.set(name, fuzzyName ? (chargebeeCustomers.find(c => c.companyName === fuzzyName) ?? null) : null)
+    }
+    return map
+  }, [chargebeeCustomers, items])
+
   // Merge Chargebee canonical names (sorted by MRR) with any feedback customers
   // not found in Chargebee — so nothing disappears from the filter.
   const companyOptions = useMemo(() => {
@@ -935,13 +953,11 @@ function FeedbackList() {
       case 'date_asc':  return arr.sort((a, b) => a.date.localeCompare(b.date))
       case 'date_desc': return arr.sort((a, b) => b.date.localeCompare(a.date))
       case 'arr_desc': {
-        const getArr = (item: FeedbackItem) =>
-          chargebeeCustomers.find(c => c.companyName.toLowerCase() === item.customer.toLowerCase())?.arr ?? 0
+        const getArr = (item: FeedbackItem) => cbLookup.get(item.customer)?.arr ?? 0
         return arr.sort((a, b) => getArr(b) - getArr(a))
       }
       case 'arr_asc': {
-        const getArr = (item: FeedbackItem) =>
-          chargebeeCustomers.find(c => c.companyName.toLowerCase() === item.customer.toLowerCase())?.arr ?? 0
+        const getArr = (item: FeedbackItem) => cbLookup.get(item.customer)?.arr ?? 0
         return arr.sort((a, b) => getArr(a) - getArr(b))
       }
       case 'urgency': {
@@ -964,7 +980,7 @@ function FeedbackList() {
     return Array.from(map.entries()).map(([company, companyItems]) => ({
       company,
       items: companyItems,
-      cb: chargebeeCustomers.find(c => c.companyName.toLowerCase() === company.toLowerCase()),
+      cb: cbLookup.get(company) ?? null,
     }))
   }, [sortedItems, chargebeeCustomers])
 
@@ -1293,7 +1309,7 @@ function FeedbackList() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="font-medium">{item.customer}</p>
                           {(() => {
-                            const cb = chargebeeCustomers.find(c => c.companyName.toLowerCase() === item.customer.toLowerCase())
+                            const cb = cbLookup.get(item.customer)
                             if (!cb) return null
                             const arr = cb.arr >= 1000 ? `$${(cb.arr / 1000).toFixed(1)}k` : `$${Math.round(cb.arr)}`
                             return (
