@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { readConfig, writeConfig } from '@/lib/storage'
 import type { IntegrationConfig } from '@/types'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET() {
   try {
     const config = await readConfig()
@@ -37,6 +39,9 @@ export async function GET() {
         ...config.chargebee,
         apiKey: maskKey(config.chargebee.apiKey),
       }
+    }
+    if (config.churnRiskScore) {
+      masked.churnRiskScore = { ...config.churnRiskScore }
     }
 
     return NextResponse.json({ config: masked })

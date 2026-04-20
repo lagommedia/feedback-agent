@@ -32,6 +32,8 @@ export default function IntegrationsPage() {
   const [chargebeeLastSynced, setChargebeeLastSynced] = useState<string | undefined>()
   const [normalizing, setNormalizing] = useState(false)
   const [saving, setSaving] = useState<string | null>(null)
+  const [computingScores, setComputingScores] = useState(false)
+  const [lastChurnScoredAt, setLastChurnScoredAt] = useState<string | undefined>()
 
   // Load existing config on mount — masked keys are loaded into state so
   // status checks work and Sync buttons stay enabled without re-entering keys.
@@ -90,6 +92,16 @@ export default function IntegrationsPage() {
         }
       })
       .catch(() => {/* silent */})
+
+    // Load last churn score timestamp
+    fetch('/api/churn-scores')
+      .then(r => r.json())
+      .then(({ scores }: { scores?: Record<string, { scoredAt: string }> }) => {
+        if (!scores) return
+        const times = Object.values(scores).map(s => s.scoredAt).filter(Boolean)
+        if (times.length > 0) setLastChurnScoredAt([...times].sort().at(-1))
+      })
+      .catch(() => {/* silent */})
   }, [])
 
   // Masked keys look like ****abcd — send '' so the backend keeps the stored value.
@@ -133,6 +145,25 @@ export default function IntegrationsPage() {
       toast.error(`Normalization failed: ${String(err)}`)
     } finally {
       setNormalizing(false)
+    }
+  }
+
+  async function computeChurnScores() {
+    if (!churnRiskScore.instructions.trim()) {
+      toast.error('Add scoring instructions and save them before computing scores.')
+      return
+    }
+    setComputingScores(true)
+    try {
+      const res = await fetch('/api/churn-scores/compute', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Computation failed')
+      toast.success(`Churn scores computed for ${data.scored} compan${data.scored !== 1 ? 'ies' : 'y'}`)
+      setLastChurnScoredAt(new Date().toISOString())
+    } catch (err) {
+      toast.error(`Churn score computation failed: ${String(err)}`)
+    } finally {
+      setComputingScores(false)
     }
   }
 
@@ -290,22 +321,54 @@ export default function IntegrationsPage() {
                 These instructions tell the AI how to weight issues, urgency, churn signals, and praises when computing a risk score per company.
               </p>
             </div>
-            <Button
-              size="sm"
-              onClick={async () => {
-                setSaving('churnRiskScore')
-                try {
-                  await saveConfig('churnRiskScore', { instructions: churnRiskScore.instructions })
-                  toast.success('Churn Risk Score instructions saved')
-                } finally {
-                  setSaving(null)
-                }
-              }}
-              disabled={saving === 'churnRiskScore'}
-            >
-              {saving === 'churnRiskScore' ? <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> : null}
-              Save Instructions
-            </Button>
+            <div className="flex items-center gap-3 flex-wrap">
+              <Button
+                size="sm"
+                onClick={async () => {
+                  setSaving('churnRiskScore')
+                  try {
+                    const res = await fetch('/api/integrations/config', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        integration: 'churnRiskScore',
+                        config: { instructions: churnRiskScore.instructions },
+                      }),
+                    })
+                    if (!res.ok) throw new Error(await res.text())
+                    toast.success('Churn Risk Score instructions saved.')
+                  } catch (err) {
+                    toast.error(`Failed to save: ${String(err)}`)
+                  } finally {
+                    setSaving(null)
+                  }
+                }}
+                disabled={saving === 'churnRiskScore'}
+              >
+                {saving === 'churnRiskScore' ? <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> : null}
+                Save Instructions
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={computeChurnScores}
+                disabled={computingScores}
+              >
+                {computingScores ? (
+                  <><Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />Computing...</>
+                ) : (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 mr-2" />
+                    Compute Scores
+                  </>
+                )}
+              </Button>
+              {lastChurnScoredAt && (
+                <p className="text-xs text-muted-foreground">
+                  Last scored: {new Date(lastChurnScoredAt).toLocaleString()}
+                </p>
+              )}
+            </div>
           </CardContent>
         </Card>
 

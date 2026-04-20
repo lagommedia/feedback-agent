@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/select'
 import { AlertCircle, ThumbsUp, Lightbulb, ChevronDown, ChevronUp, Search, Loader2, Pencil, Check, X as XIcon, MessageSquarePlus, ExternalLink, UserCircle, Building2 } from 'lucide-react'
 import type { FeedbackItem, FeedbackSource, FeedbackType, UrgencyLevel, AppType, WorkflowStatus, ActionItem, ChargebeeCustomer } from '@/types'
+import type { ChurnScore } from '@/lib/storage'
 import { PRODUCT_TAGS, SERVICE_TAGS, CHURN_TAGS, TAGS_BY_APP_TYPE, APP_TYPES } from '@/types'
 import { FeedbackDrawer } from '@/components/feedback/feedback-drawer'
 import { bestChargebeeMatch } from '@/lib/name-match'
@@ -304,6 +305,51 @@ function CompanyAssignWidget({
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+function ChurnScoreBar({ score, confidence }: { score: number; confidence: 'high' | 'medium' | 'low' }) {
+  // score=0 means no risk (green), score=100 means certain churn (red)
+  const scoreColor = score >= 65 ? '#ef4444' : score >= 35 ? '#f59e0b' : '#22c55e'
+
+  const confMap = {
+    high:   { bg: 'rgba(34,197,94,0.12)',  text: '#4ade80',  label: 'High' },
+    medium: { bg: 'rgba(245,158,11,0.12)', text: '#fbbf24',  label: 'Med' },
+    low:    { bg: 'rgba(148,163,184,0.1)', text: '#94a3b8',  label: 'Low' },
+  }
+  const conf = confMap[confidence] ?? confMap.low
+
+  return (
+    <div
+      className="flex items-center gap-2 shrink-0 select-none"
+      title={`Churn risk score: ${score}/100 · Confidence: ${confidence}`}
+      onClick={e => e.stopPropagation()}
+    >
+      {/* Gradient scale bar + needle */}
+      <div className="flex flex-col items-center gap-1">
+        <div
+          className="relative w-[72px] h-1.5 rounded-full overflow-visible"
+          style={{ background: 'linear-gradient(to right, #22c55e 0%, #f59e0b 50%, #ef4444 100%)' }}
+        >
+          {/* Needle */}
+          <div
+            className="absolute -top-[3px] w-[3px] h-[9px] rounded-full bg-white shadow-[0_0_0_1.5px_rgba(0,0,0,0.4)]"
+            style={{ left: `clamp(0%, ${score}%, 100%)`, transform: 'translateX(-50%)' }}
+          />
+        </div>
+      </div>
+      {/* Score number */}
+      <span className="text-[11px] font-bold tabular-nums w-6 text-right" style={{ color: scoreColor }}>
+        {score}
+      </span>
+      {/* Confidence pill */}
+      <span
+        className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full"
+        style={{ background: conf.bg, color: conf.text }}
+      >
+        {conf.label}
+      </span>
     </div>
   )
 }
@@ -771,6 +817,7 @@ function FeedbackList() {
   const [allCustomers, setAllCustomers] = useState<string[]>([])
   const [chargebeeCustomers, setChargebeeCustomers] = useState<ChargebeeCustomer[]>([])
   const [companyAssignments, setCompanyAssignments] = useState<Record<string, string>>({})
+  const [churnScores, setChurnScores] = useState<Record<string, ChurnScore>>({})
 
   useEffect(() => {
     fetch('/api/auth/me').then(r => r.json()).then(d => setCurrentUser(d.email ?? null))
@@ -778,6 +825,7 @@ function FeedbackList() {
     fetch('/api/feedback/customers').then(r => r.json()).then(d => setAllCustomers(d.customers ?? []))
     fetch('/api/chargebee/customers').then(r => r.json()).then(d => setChargebeeCustomers(d.customers ?? []))
     fetch('/api/company-assignments').then(r => r.json()).then(d => setCompanyAssignments(d.assignments ?? {}))
+    fetch('/api/churn-scores').then(r => r.json()).then(d => setChurnScores(d.scores ?? {}))
   }, [])
 
   function toggleCompany(company: string) {
@@ -1133,6 +1181,7 @@ function FeedbackList() {
             const isCompanyExpanded = expandedCompanies.has(company)
             const arrStr = cb ? (cb.arr >= 1000 ? `$${(cb.arr / 1000).toFixed(1)}k` : `$${Math.round(cb.arr)}`) : null
             const companyAssignee = companyAssignments[company]
+            const churnScore = churnScores[company]
             return (
               <div key={company} className="rounded-lg border border-border overflow-hidden">
                 {/* Company header */}
@@ -1146,6 +1195,10 @@ function FeedbackList() {
                     {arrStr && <span className="text-[11px] font-semibold text-blue-400">{arrStr} ARR</span>}
                     <span className="text-xs text-muted-foreground">{companyItems.length} ticket{companyItems.length !== 1 ? 's' : ''}</span>
                   </div>
+                  {/* Churn risk heat bar */}
+                  {churnScore && (
+                    <ChurnScoreBar score={churnScore.score} confidence={churnScore.confidence} />
+                  )}
                   {/* Company-level assignee */}
                   <CompanyAssignWidget
                     company={company}

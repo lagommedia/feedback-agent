@@ -19,19 +19,23 @@ export async function POST(req: Request) {
 
     const frontConfig = config.front!
 
-    // Default lookback: 90 days so we catch everything since April.
-    // If the integration has been synced recently, use that timestamp instead
-    // (unless an explicit since= param was passed, or reset=true).
-    const DEFAULT_LOOKBACK_DAYS = 90
+    // Initial sync: 14-day lookback to seed recent history.
+    // Ongoing syncs: cap at 24 hours so each nightly run stays fast.
+    const DEFAULT_LOOKBACK_DAYS = 14
+    const MAX_ONGOING_LOOKBACK_HOURS = 24
+
     const defaultLookback = new Date()
     defaultLookback.setDate(defaultLookback.getDate() - DEFAULT_LOOKBACK_DAYS)
     defaultLookback.setHours(0, 0, 0, 0)
+
+    const ongoingCap = new Date()
+    ongoingCap.setHours(ongoingCap.getHours() - MAX_ONGOING_LOOKBACK_HOURS)
 
     const lastSyncedAt = resetParam ? undefined : frontConfig.lastSyncedAt
     const since = sinceParam
       ? new Date(sinceParam)
       : lastSyncedAt
-        ? new Date(lastSyncedAt)
+        ? new Date(Math.max(new Date(lastSyncedAt).getTime(), ongoingCap.getTime()))
         : defaultLookback
 
     const internalEmails = frontConfig.internalEmails ?? []

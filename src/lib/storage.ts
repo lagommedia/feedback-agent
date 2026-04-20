@@ -121,6 +121,13 @@ async function ensureSchema(): Promise<void> {
       assigned_to TEXT NOT NULL,
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS company_churn_scores (
+      company_name TEXT PRIMARY KEY,
+      score NUMERIC NOT NULL,
+      confidence TEXT NOT NULL,
+      reasoning TEXT,
+      scored_at TIMESTAMPTZ DEFAULT NOW()
+    );
   `)
   _schemaReady = true
 }
@@ -877,4 +884,49 @@ export async function getChargebeeCustomers(): Promise<ChargebeeCustomer[]> {
     arr: parseFloat(r.arr),
     status: r.status,
   }))
+}
+
+export interface ChurnScore {
+  companyName: string
+  score: number
+  confidence: 'high' | 'medium' | 'low'
+  reasoning: string
+  scoredAt: string
+}
+
+export async function upsertChurnScores(scores: ChurnScore[]): Promise<void> {
+  await ensureSchema()
+  if (scores.length === 0) return
+  const pool = getPool()
+  for (const s of scores) {
+    await pool.query(
+      `INSERT INTO company_churn_scores (company_name, score, confidence, reasoning, scored_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (company_name) DO UPDATE SET
+         score = EXCLUDED.score,
+         confidence = EXCLUDED.confidence,
+         reasoning = EXCLUDED.reasoning,
+         scored_at = NOW()`,
+      [s.companyName, s.score, s.confidence, s.reasoning],
+    )
+  }
+}
+
+export async function getChurnScores(): Promise<Record<string, ChurnScore>> {
+  await ensureSchema()
+  const pool = getPool()
+  const res = await pool.query(
+    'SELECT company_name, score, confidence, reasoning, scored_at FROM company_churn_scores'
+  )
+  const map: Record<string, ChurnScore> = {}
+  for (const r of res.rows) {
+    map[r.company_name] = {
+      companyName: r.company_name,
+      score: parseFloat(r.score),
+      confidence: r.confidence,
+      reasoning: r.reasoning ?? '',
+      scoredAt: r.scored_at,
+    }
+  }
+  return map
 }
