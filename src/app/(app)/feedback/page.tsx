@@ -14,12 +14,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { AlertCircle, ThumbsUp, Lightbulb, ChevronDown, ChevronUp, Search, Loader2, Pencil, Check, X as XIcon, MessageSquarePlus, ExternalLink, UserCircle, Building2 } from 'lucide-react'
+import { AlertCircle, ThumbsUp, Lightbulb, ChevronDown, ChevronUp, Search, Loader2, Pencil, Check, X as XIcon, MessageSquarePlus, ExternalLink, UserCircle, Building2, Sparkles } from 'lucide-react'
 import type { FeedbackItem, FeedbackSource, FeedbackType, UrgencyLevel, AppType, WorkflowStatus, ActionItem, ChargebeeCustomer } from '@/types'
 import type { ChurnScore } from '@/lib/storage'
 import { PRODUCT_TAGS, SERVICE_TAGS, CHURN_TAGS, TAGS_BY_APP_TYPE, APP_TYPES } from '@/types'
 import { FeedbackDrawer } from '@/components/feedback/feedback-drawer'
 import { bestChargebeeMatch } from '@/lib/name-match'
+import { isAiCustomer } from '@/lib/ai-customers'
 
 const SOURCE_LOGOS: Record<string, { logo: string; alt: string }> = {
   avoma: { logo: 'https://www.google.com/s2/favicons?domain=avoma.com&sz=32', alt: 'Avoma' },
@@ -926,6 +927,7 @@ function FeedbackList() {
   const [urgencyFilter, setUrgencyFilter] = useState<string>(searchParams.get('urgency') ?? '')
   const [tagFilter, setTagFilter] = useState<string>(searchParams.get('tag') ?? '')
   const [appTypeFilter, setAppTypeFilter] = useState<string>(searchParams.get('app') ?? '')
+  const [aiFilter, setAiFilter] = useState(false)
 
   const fetchItems = useCallback(async () => {
     setLoading(true)
@@ -967,7 +969,7 @@ function FeedbackList() {
     return () => clearTimeout(t)
   }, [fetchItems])
 
-  const hasFilters = !!(typeFilter || urgencyFilter || tagFilter || appTypeFilter || search || assignedToFilter || companyFilter)
+  const hasFilters = !!(typeFilter || urgencyFilter || tagFilter || appTypeFilter || search || assignedToFilter || companyFilter || aiFilter)
 
   // Fuzzy lookup map: feedback customer name → matched ChargebeeCustomer (or null)
   // Built once when chargebeeCustomers loads, so we don't re-run fuzzy match on every render.
@@ -1027,12 +1029,17 @@ function FeedbackList() {
       if (!map.has(key)) map.set(key, [])
       map.get(key)!.push(item)
     }
-    return Array.from(map.entries()).map(([company, companyItems]) => ({
-      company,
-      items: companyItems,
-      cb: cbLookup.get(company) ?? null,
-    }))
-  }, [sortedItems, chargebeeCustomers])
+    const groups = Array.from(map.entries()).map(([company, companyItems]) => {
+      const cb = cbLookup.get(company) ?? null
+      return {
+        company,
+        items: companyItems,
+        cb,
+        isAi: isAiCustomer(company, cb?.companyName),
+      }
+    })
+    return aiFilter ? groups.filter(g => g.isAi) : groups
+  }, [sortedItems, cbLookup, aiFilter])
 
   return (
     <div className="p-8">
@@ -1124,6 +1131,20 @@ function FeedbackList() {
           </Select>
         </div>
         <div className="flex flex-col gap-1">
+          <span className="text-xs text-muted-foreground font-medium px-0.5 invisible">AI</span>
+          <button
+            onClick={() => setAiFilter(f => !f)}
+            className={`h-9 inline-flex items-center gap-1.5 px-3 rounded-md border text-sm font-medium transition-colors whitespace-nowrap ${
+              aiFilter
+                ? 'bg-violet-500/20 border-violet-500/50 text-violet-300'
+                : 'border-input text-muted-foreground hover:text-foreground hover:border-primary/40'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            AI Customers
+          </button>
+        </div>
+        <div className="flex flex-col gap-1">
           <span className="text-xs text-muted-foreground font-medium px-0.5">Sort By</span>
           <Select value={sortBy} onValueChange={(v) => setSortBy(v ?? 'date_desc')}>
             <SelectTrigger className="w-44">
@@ -1153,6 +1174,7 @@ function FeedbackList() {
               setAppTypeFilter('')
               setAssignedToFilter('')
               setCompanyFilter('')
+              setAiFilter(false)
             }}
           >
             Clear filters
@@ -1177,7 +1199,7 @@ function FeedbackList() {
         </Card>
       ) : (
         <div className="space-y-3">
-          {groupedByCompany.map(({ company, items: companyItems, cb }) => {
+          {groupedByCompany.map(({ company, items: companyItems, cb, isAi }) => {
             const isCompanyExpanded = expandedCompanies.has(company)
             const arrStr = cb ? (cb.arr >= 1000 ? `$${(cb.arr / 1000).toFixed(1)}k` : `$${Math.round(cb.arr)}`) : null
             const companyAssignee = companyAssignments[company]
@@ -1192,6 +1214,12 @@ function FeedbackList() {
                   <Building2 className="w-4 h-4 text-muted-foreground shrink-0" />
                   <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
                     <span className="font-semibold text-sm">{company}</span>
+                    {isAi && (
+                      <Sparkles
+                        className="w-3.5 h-3.5 shrink-0 text-violet-400"
+                        title="AI customer"
+                      />
+                    )}
                     {arrStr && <span className="text-[11px] font-semibold text-blue-400">{arrStr} ARR</span>}
                     <span className="text-xs text-muted-foreground">{companyItems.length} ticket{companyItems.length !== 1 ? 's' : ''}</span>
                   </div>
