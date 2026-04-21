@@ -1215,10 +1215,9 @@ function FeedbackList() {
                   <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
                     <span className="font-semibold text-sm">{company}</span>
                     {isAi && (
-                      <Sparkles
-                        className="w-3.5 h-3.5 shrink-0 text-violet-400"
-                        title="AI customer"
-                      />
+                      <span title="AI customer">
+                        <Sparkles className="w-3.5 h-3.5 shrink-0 text-violet-400" />
+                      </span>
                     )}
                     {arrStr && <span className="text-[11px] font-semibold text-blue-400">{arrStr} ARR</span>}
                     <span className="text-xs text-muted-foreground">{companyItems.length} ticket{companyItems.length !== 1 ? 's' : ''}</span>
