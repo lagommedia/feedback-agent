@@ -27,24 +27,14 @@ export async function POST() {
     }
 
     const client = new Anthropic({ apiKey })
-    const results: ChurnScore[] = []
 
-    // Process in batches of 5 companies per Claude call to stay within token limits
+    // 20 companies per Claude call — balances token usage vs number of calls
     const companies = [...byCompany.entries()]
-    const BATCH = 5
+    const BATCH = 20
 
-    for (let i = 0; i < companies.length; i += BATCH) {
-      const batch = companies.slice(i, i + BATCH)
-      const userContent = batch.map(([company, companyItems]) => {
-        const summary = companyItems.slice(0, 20).map(it =>
-          `- [${it.type}] [${it.urgency}] [${it.appType}] ${it.title}: ${it.description.slice(0, 150)}`
-        ).join('\n')
-        return `Company: ${company}\nFeedback (${companyItems.length} items):\n${summary}`
-      }).join('\n\n---\n\n')
+    const systemPrompt = `You compute churn risk scores for customers based on their feedback.
 
-      const systemPrompt = `You compute churn risk scores for Zeni customers based on their feedback.
-
-Scoring instructions from the Zeni team:
+Scoring instructions:
 ${scoringInstructions}
 
 For each company provided, return a JSON array where each element is:
@@ -62,10 +52,25 @@ Confidence guide:
 
 Return ONLY a valid JSON array. No markdown, no explanation.`
 
-      try {
+    // Build all batch requests
+    const batches: Array<[string, typeof items][]> = []
+    for (let i = 0; i < companies.length; i += BATCH) {
+      batches.push(companies.slice(i, i + BATCH))
+    }
+
+    // Run all batches in parallel — cuts total time from N*T to ~T regardless of company count
+    const batchResults = await Promise.allSettled(
+      batches.map(async (batch, idx) => {
+        const userContent = batch.map(([company, companyItems]) => {
+          const summary = companyItems.slice(0, 20).map(it =>
+            `- [${it.type}] [${it.urgency}] [${it.appType}] ${it.title}: ${it.description.slice(0, 150)}`
+          ).join('\n')
+          return `Company: ${company}\nFeedback (${companyItems.length} items):\n${summary}`
+        }).join('\n\n---\n\n')
+
         const response = await client.messages.create({
           model: 'claude-sonnet-4-6',
-          max_tokens: 2048,
+          max_tokens: 4096,
           system: systemPrompt,
           messages: [{ role: 'user', content: userContent }],
         })
@@ -73,11 +78,12 @@ Return ONLY a valid JSON array. No markdown, no explanation.`
         const text = response.content[0].type === 'text' ? response.content[0].text : '[]'
         const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
         const parsed = JSON.parse(cleaned)
+        const scored: ChurnScore[] = []
 
         if (Array.isArray(parsed)) {
           for (const item of parsed) {
             if (item.company && typeof item.score === 'number') {
-              results.push({
+              scored.push({
                 companyName: item.company,
                 score: Math.min(100, Math.max(0, Math.round(item.score))),
                 confidence: ['high', 'medium', 'low'].includes(item.confidence) ? item.confidence : 'low',
@@ -87,10 +93,18 @@ Return ONLY a valid JSON array. No markdown, no explanation.`
             }
           }
         }
-      } catch (err) {
-        console.error(`[churn-scores] Batch ${i / BATCH + 1} failed:`, err)
+        return scored
+      })
+    )
+
+    const results: ChurnScore[] = []
+    batchResults.forEach((r, idx) => {
+      if (r.status === 'fulfilled') {
+        results.push(...r.value)
+      } else {
+        console.error(`[churn-scores] Batch ${idx + 1} failed:`, r.reason)
       }
-    }
+    })
 
     await upsertChurnScores(results)
     return NextResponse.json({ scored: results.length })
