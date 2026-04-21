@@ -33,6 +33,8 @@ let _schemaReady = false
 async function ensureSchema(): Promise<void> {
   if (_schemaReady) return
   const pool = getPool()
+
+  // Core tables — CREATE TABLE IF NOT EXISTS is always safe to re-run
   await pool.query(`
     CREATE TABLE IF NOT EXISTS app_config (
       id INTEGER PRIMARY KEY DEFAULT 1,
@@ -75,10 +77,8 @@ async function ensureSchema(): Promise<void> {
     CREATE TABLE IF NOT EXISTS app_users (
       email TEXT PRIMARY KEY,
       password TEXT NOT NULL,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      permissions JSONB NOT NULL DEFAULT '["dashboard","integrations","feedback","chat","reports","users"]'::jsonb
+      created_at TIMESTAMPTZ DEFAULT NOW()
     );
-    ALTER TABLE app_users ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '["dashboard","integrations","feedback","chat","reports","users"]'::jsonb;
     CREATE TABLE IF NOT EXISTS training_examples (
       id SERIAL PRIMARY KEY,
       feedback_id TEXT,
@@ -129,6 +129,13 @@ async function ensureSchema(): Promise<void> {
       scored_at TIMESTAMPTZ DEFAULT NOW()
     );
   `)
+
+  // Column migrations — run separately so a no-op ALTER doesn't abort the block above
+  await pool.query(`
+    ALTER TABLE app_users ADD COLUMN IF NOT EXISTS permissions
+      JSONB NOT NULL DEFAULT '["dashboard","integrations","feedback","chat","reports","users"]'::jsonb;
+  `)
+
   _schemaReady = true
 }
 

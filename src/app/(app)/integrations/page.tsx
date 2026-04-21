@@ -156,8 +156,13 @@ export default function IntegrationsPage() {
     setComputingScores(true)
     try {
       const res = await fetch('/api/churn-scores/compute', { method: 'POST' })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error ?? 'Computation failed')
+      // Parse response safely — a Vercel timeout returns an HTML page, not JSON
+      const text = await res.text()
+      let data: { scored?: number; error?: string } = {}
+      try { data = JSON.parse(text) } catch {
+        throw new Error(`Server returned HTTP ${res.status}${res.statusText ? ` (${res.statusText})` : ''}. Check Vercel function logs for details.`)
+      }
+      if (!res.ok) throw new Error(data.error ?? `Server error ${res.status}`)
       toast.success(`Churn scores computed for ${data.scored} compan${data.scored !== 1 ? 'ies' : 'y'}`)
       setLastChurnScoredAt(new Date().toISOString())
     } catch (err) {
