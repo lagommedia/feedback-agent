@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     const sinceParam = url.searchParams.get('since')
     const limitParam = url.searchParams.get('limit')
     const resetParam = url.searchParams.get('reset') === 'true'
-    const perCallLimit = limitParam ? parseInt(limitParam) : 75
+    const perCallLimit = limitParam ? parseInt(limitParam) : 40
 
     const frontConfig = config.front!
 
@@ -42,7 +42,7 @@ export async function POST(req: Request) {
     const excludeInboxIds = frontConfig.inboxIds ?? []
     const chargebeeCustomers = await getChargebeeCustomers()
     console.log(`[Front sync] Using ${chargebeeCustomers.length} Chargebee customers for domain filtering`)
-    const data = await syncFront(frontConfig.bearerToken!, since, internalEmails, excludeInboxIds, perCallLimit, chargebeeCustomers)
+    const data = await syncFront(frontConfig.bearerToken!, since, internalEmails, excludeInboxIds, perCallLimit, chargebeeCustomers, 200_000)
     await mergeFrontRaw(data)
 
     // Clear ONLY the conversations we actually just re-synced (fresh messages fetched)

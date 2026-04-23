@@ -15,21 +15,24 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
-async function fetchWithRetry(url: string, token: string, retries = 4): Promise<Response> {
+async function fetchWithRetry(url: string, token: string, retries = 4, deadline?: number): Promise<Response> {
   for (let attempt = 0; attempt < retries; attempt++) {
+    if (deadline && Date.now() >= deadline) throw new Error('FRONT_DEADLINE_EXCEEDED')
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 30_000) // 30s timeout per request
     try {
       const res = await fetch(url, { headers: headers(token), signal: controller.signal })
       clearTimeout(timer)
       if (res.status === 429) {
-        const retryAfter = parseInt(res.headers.get('Retry-After') ?? '60')
+        // Cap at 15s — never burn >15s waiting on a rate limit within a time-budgeted sync
+        const retryAfter = Math.min(parseInt(res.headers.get('Retry-After') ?? '15'), 15)
         await sleep(retryAfter * 1000)
         continue
       }
       return res
     } catch (err) {
       clearTimeout(timer)
+      if (err instanceof Error && err.message === 'FRONT_DEADLINE_EXCEEDED') throw err
       if (attempt < retries - 1) {
         await sleep(2000 * (attempt + 1)) // exponential backoff
         continue
@@ -129,6 +132,7 @@ async function fetchConversationPage(
   since: Date,
   internalEmails: string[],
   chargebeeDomains?: Set<string>,
+  deadline?: number,
 ): Promise<FrontRawConversation[]> {
   const conversations: FrontRawConversation[] = []
   const sinceTs = Math.floor(since.getTime() / 1000)
@@ -142,9 +146,13 @@ async function fetchConversationPage(
   let totalFetched = 0
 
   while (url) {
+    if (deadline && Date.now() >= deadline - 30_000) {
+      console.log(`[Front] Approaching deadline, stopping pagination early at page ${page}`)
+      break
+    }
     page++
     console.log(`[Front] Fetching page ${page} from ${baseUrl} (${totalFetched} total, ${conversations.length} kept so far)...`)
-    const res = await fetchWithRetry(url, token)
+    const res = await fetchWithRetry(url, token, 4, deadline)
     if (!res.ok) throw new Error(`Front conversations API error: ${res.status} ${await res.text()}`)
     const data = await res.json()
     const batch: FrontRawConversation[] = data._results ?? []
@@ -176,6 +184,7 @@ async function fetchAllConversations(
   internalEmails: string[] = [],
   excludeInboxIds: string[] = [],
   chargebeeCustomers: ChargebeeCustomer[] = [],
+  deadline?: number,
 ): Promise<FrontRawConversation[]> {
   const sinceDate = since ?? (() => {
     const d = new Date()
@@ -192,7 +201,7 @@ async function fetchAllConversations(
   console.log(`[Front] Chargebee domain filter: ${chargebeeDomains?.size ?? 0} known customer domains`)
 
   // Always use the global /conversations endpoint — it properly respects q[after]
-  const all = await fetchConversationPage(token, `${BASE_URL}/conversations`, sinceDate, internalEmails, chargebeeDomains)
+  const all = await fetchConversationPage(token, `${BASE_URL}/conversations`, sinceDate, internalEmails, chargebeeDomains, deadline)
 
   // Apply exclude inbox filter (post-filter — skip conversations from excluded inboxes)
   if (excludeInboxIds.length === 0) return all
@@ -213,13 +222,15 @@ async function fetchAllConversations(
 
 async function fetchConversationMessages(
   token: string,
-  conversationId: string
+  conversationId: string,
+  deadline?: number,
 ): Promise<FrontRawMessage[]> {
   const messages: FrontRawMessage[] = []
   let url: string | null = `${BASE_URL}/conversations/${conversationId}/messages?limit=100`
 
   while (url) {
-    const res = await fetchWithRetry(url, token)
+    if (deadline && Date.now() >= deadline - 30_000) return messages
+    const res = await fetchWithRetry(url, token, 4, deadline)
     if (!res.ok) return messages // skip on error
     const data = await res.json()
 
@@ -255,8 +266,10 @@ export async function syncFront(
   excludeInboxIds: string[] = [],
   limit?: number,  // cap how many conversations get messages fetched (for timeout safety)
   chargebeeCustomers: ChargebeeCustomer[] = [],
+  budgetMs?: number,  // total time budget; function returns partial results rather than exceeding it
 ): Promise<FrontRawData> {
-  const allConversations = await fetchAllConversations(token, since, internalEmails, excludeInboxIds, chargebeeCustomers)
+  const deadline = budgetMs ? Date.now() + budgetMs : undefined
+  const allConversations = await fetchAllConversations(token, since, internalEmails, excludeInboxIds, chargebeeCustomers, deadline)
   // If a limit is set, take the most recently-updated conversations first
   const conversations = limit ? allConversations.slice(0, limit) : allConversations
 
@@ -264,9 +277,13 @@ export async function syncFront(
   const CONCURRENCY = 5
 
   for (let i = 0; i < conversations.length; i += CONCURRENCY) {
+    if (deadline && Date.now() >= deadline - 30_000) {
+      console.log(`[Front] Approaching deadline, stopping message fetch at ${i}/${conversations.length} conversations`)
+      break
+    }
     const batch = conversations.slice(i, i + CONCURRENCY)
     const results = await Promise.all(
-      batch.map((c) => fetchConversationMessages(token, c.id))
+      batch.map((c) => fetchConversationMessages(token, c.id, deadline))
     )
     for (const msgs of results) {
       allMessages.push(...msgs)
