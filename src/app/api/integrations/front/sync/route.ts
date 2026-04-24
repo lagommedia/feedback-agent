@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { readConfig, mergeFrontRaw, writeConfig, unmarkAnalyzedSources, getChargebeeCustomers } from '@/lib/storage'
+import { readConfig, mergeFrontRaw, writeConfig, unmarkAnalyzedSources } from '@/lib/storage'
 import { syncFront } from '@/lib/front'
 
 export const maxDuration = 300
@@ -40,9 +40,7 @@ export async function POST(req: Request) {
 
     const internalEmails = frontConfig.internalEmails ?? []
     const excludeInboxIds = frontConfig.inboxIds ?? []
-    const chargebeeCustomers = await getChargebeeCustomers()
-    console.log(`[Front sync] Using ${chargebeeCustomers.length} Chargebee customers for domain filtering`)
-    const data = await syncFront(frontConfig.bearerToken!, since, internalEmails, excludeInboxIds, perCallLimit, chargebeeCustomers, 200_000)
+    const data = await syncFront(frontConfig.bearerToken!, since, internalEmails, excludeInboxIds, perCallLimit, 200_000)
     await mergeFrontRaw(data)
 
     // Clear ONLY the conversations we actually just re-synced (fresh messages fetched)

@@ -1,5 +1,4 @@
 import type { FrontRawConversation, FrontRawData, FrontRawMessage } from '@/types'
-import type { ChargebeeCustomer } from '@/lib/chargebee'
 
 const BASE_URL = 'https://api2.frontapp.com'
 
@@ -74,28 +73,9 @@ const AUTOMATED_SUBJECT_PATTERNS = [
   /^unsubscribe/i,
 ]
 
-function emailDomain(email: string): string {
-  return email.toLowerCase().split('@')[1] ?? ''
-}
-
-function buildChargebeeDomains(customers: ChargebeeCustomer[]): Set<string> {
-  const domains = new Set<string>()
-  for (const c of customers) {
-    if (c.email) {
-      const d = emailDomain(c.email)
-      // Exclude generic email providers — not useful for B2B matching
-      if (d && !['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com', 'aol.com', 'protonmail.com'].includes(d)) {
-        domains.add(d)
-      }
-    }
-  }
-  return domains
-}
-
 function isCustomerConversation(
   convo: FrontRawConversation,
   internalEmails: string[],
-  chargebeeDomains?: Set<string>,
 ): boolean {
   const recipient = convo.recipient as Record<string, unknown> | undefined
   const handle = String((recipient?.handle as string) ?? '').toLowerCase()
@@ -117,12 +97,6 @@ function isCustomerConversation(
   // Exclude conversations with no real recipient (system events)
   if (!handle || handle === '') return false
 
-  // If we have Chargebee domains, require the sender's domain to match a known customer
-  if (chargebeeDomains && chargebeeDomains.size > 0) {
-    const senderDomain = emailDomain(handle)
-    if (senderDomain && !chargebeeDomains.has(senderDomain)) return false
-  }
-
   return true
 }
 
@@ -131,7 +105,6 @@ async function fetchConversationPage(
   baseUrl: string,
   since: Date,
   internalEmails: string[],
-  chargebeeDomains?: Set<string>,
   deadline?: number,
 ): Promise<FrontRawConversation[]> {
   const conversations: FrontRawConversation[] = []
@@ -162,7 +135,7 @@ async function fetchConversationPage(
     // Use updated_at (last reply) not created_at (thread opened) so threads started before the
     // window but replied to within it are included
     const withinWindow = batch.filter(c => (c.updated_at ?? c.created_at ?? 0) >= sinceTs)
-    const customerBatch = withinWindow.filter(c => isCustomerConversation(c, internalEmails, chargebeeDomains))
+    const customerBatch = withinWindow.filter(c => isCustomerConversation(c, internalEmails))
     conversations.push(...customerBatch)
 
     if (withinWindow.length < batch.length) {
@@ -183,7 +156,6 @@ async function fetchAllConversations(
   since?: Date,
   internalEmails: string[] = [],
   excludeInboxIds: string[] = [],
-  chargebeeCustomers: ChargebeeCustomer[] = [],
   deadline?: number,
 ): Promise<FrontRawConversation[]> {
   const sinceDate = since ?? (() => {
@@ -193,15 +165,8 @@ async function fetchAllConversations(
     return d
   })()
 
-  // Build Chargebee domain set for filtering — only conversations from known customer domains
-  const chargebeeDomains = chargebeeCustomers.length > 0
-    ? buildChargebeeDomains(chargebeeCustomers)
-    : undefined
-
-  console.log(`[Front] Chargebee domain filter: ${chargebeeDomains?.size ?? 0} known customer domains`)
-
   // Always use the global /conversations endpoint — it properly respects q[after]
-  const all = await fetchConversationPage(token, `${BASE_URL}/conversations`, sinceDate, internalEmails, chargebeeDomains, deadline)
+  const all = await fetchConversationPage(token, `${BASE_URL}/conversations`, sinceDate, internalEmails, deadline)
 
   // Apply exclude inbox filter (post-filter — skip conversations from excluded inboxes)
   if (excludeInboxIds.length === 0) return all
@@ -265,11 +230,10 @@ export async function syncFront(
   internalEmails: string[] = [],
   excludeInboxIds: string[] = [],
   limit?: number,  // cap how many conversations get messages fetched (for timeout safety)
-  chargebeeCustomers: ChargebeeCustomer[] = [],
   budgetMs?: number,  // total time budget; function returns partial results rather than exceeding it
 ): Promise<FrontRawData> {
   const deadline = budgetMs ? Date.now() + budgetMs : undefined
-  const allConversations = await fetchAllConversations(token, since, internalEmails, excludeInboxIds, chargebeeCustomers, deadline)
+  const allConversations = await fetchAllConversations(token, since, internalEmails, excludeInboxIds, deadline)
   // If a limit is set, take the most recently-updated conversations first
   const conversations = limit ? allConversations.slice(0, limit) : allConversations
 
