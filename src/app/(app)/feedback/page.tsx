@@ -814,6 +814,7 @@ function FeedbackList() {
   const [users, setUsers] = useState<{ email: string }[]>([])
   const [assignedToFilter, setAssignedToFilter] = useState<string>('')
   const [companyFilter, setCompanyFilter] = useState<string>('')
+  const [sourceFilter, setSourceFilter] = useState<string>('')
   const [sortBy, setSortBy] = useState<string>('date_desc')
   const [allCustomers, setAllCustomers] = useState<string[]>([])
   const [chargebeeCustomers, setChargebeeCustomers] = useState<ChargebeeCustomer[]>([])
@@ -947,6 +948,7 @@ function FeedbackList() {
       if (search) params.set('search', search)
       if (assignedToFilter) params.set('assignedTo', assignedToFilter)
       if (companyFilter) params.set('customer', companyFilter)
+      if (sourceFilter) params.set('source', sourceFilter)
     }
     if (appParam) params.set('appType', appParam)
     if (appTypeFilter) params.set('appType', appTypeFilter)
@@ -962,14 +964,14 @@ function FeedbackList() {
     } finally {
       setLoading(false)
     }
-  }, [idParam, isDateView, fromParam, toParam, search, typeFilter, urgencyFilter, tagFilter, appTypeFilter, assignedToFilter, companyFilter, appParam, searchParams])
+  }, [idParam, isDateView, fromParam, toParam, search, typeFilter, urgencyFilter, tagFilter, appTypeFilter, assignedToFilter, companyFilter, sourceFilter, appParam, searchParams])
 
   useEffect(() => {
     const t = setTimeout(fetchItems, 200)
     return () => clearTimeout(t)
   }, [fetchItems])
 
-  const hasFilters = !!(typeFilter || urgencyFilter || tagFilter || appTypeFilter || search || assignedToFilter || companyFilter || aiFilter)
+  const hasFilters = !!(typeFilter || urgencyFilter || tagFilter || appTypeFilter || search || assignedToFilter || companyFilter || sourceFilter || aiFilter)
 
   // Fuzzy lookup map: feedback customer name → matched ChargebeeCustomer (or null)
   // Built once when chargebeeCustomers loads, so we don't re-run fuzzy match on every render.
@@ -1089,6 +1091,20 @@ function FeedbackList() {
           onChange={setAssignedToFilter}
         />
         <div className="flex flex-col gap-1">
+          <span className="text-xs text-muted-foreground font-medium px-0.5">Source</span>
+          <Select value={sourceFilter} onValueChange={(v) => setSourceFilter(v ?? '')}>
+            <SelectTrigger className="w-36">
+              <SelectValue placeholder="All Sources" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">All Sources</SelectItem>
+              <SelectItem value="avoma">Avoma</SelectItem>
+              <SelectItem value="front">Front</SelectItem>
+              <SelectItem value="slack">Slack</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1">
           <span className="text-xs text-muted-foreground font-medium px-0.5">Application</span>
           <Select value={appTypeFilter} onValueChange={(v) => setAppTypeFilter(v ?? '')}>
             <SelectTrigger className="w-44">
@@ -1174,6 +1190,7 @@ function FeedbackList() {
               setAppTypeFilter('')
               setAssignedToFilter('')
               setCompanyFilter('')
+              setSourceFilter('')
               setAiFilter(false)
             }}
           >
