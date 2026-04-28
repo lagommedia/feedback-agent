@@ -115,13 +115,13 @@ async function fetchWithRetry(url: string, apiKey: string, retries = 5): Promise
   throw new Error('Avoma rate limit: max retries exceeded')
 }
 
-export async function syncAvoma(apiKey: string, since?: Date): Promise<AvomaRawData> {
+export async function syncAvoma(apiKey: string, since?: Date, knownUuids: Set<string> = new Set()): Promise<AvomaRawData> {
   const meetings = await fetchAllMeetings(apiKey, since)
 
-  // Only fetch transcripts for external customer meetings that have a transcript ready
-  // is_internal is already filtered in fetchAllMeetings, this is a final safety check
+  // Only fetch transcripts for external meetings that have a transcript ready
+  // AND whose transcript isn't already stored — avoids re-fetching from Avoma API
   const meetingsWithTranscripts = meetings.filter(
-    (m) => !m.is_internal && m.transcript_ready && m.transcription_uuid
+    (m) => !m.is_internal && m.transcript_ready && m.transcription_uuid && !knownUuids.has(m.uuid)
   )
 
   console.log(`[Avoma] ${meetings.length} external meetings found, ${meetingsWithTranscripts.length} have transcripts ready`)

@@ -231,6 +231,13 @@ export async function writeAvomaRaw(data: AvomaRawData): Promise<void> {
 }
 
 /** Merge new Avoma data into existing, deduplicating by uuid */
+export async function getStoredTranscriptUuids(): Promise<Set<string>> {
+  await ensureSchema()
+  const pool = getPool()
+  const res = await pool.query('SELECT meeting_uuid FROM avoma_transcripts')
+  return new Set(res.rows.map((r: { meeting_uuid: string }) => r.meeting_uuid))
+}
+
 export async function mergeAvomaRaw(newData: AvomaRawData): Promise<AvomaRawData> {
   await ensureSchema()
   // Insert meetings (skip duplicates)

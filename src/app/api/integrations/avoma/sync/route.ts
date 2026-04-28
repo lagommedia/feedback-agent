@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { mergeAvomaRaw, readConfig, writeConfig } from '@/lib/storage'
+import { mergeAvomaRaw, readConfig, writeConfig, getStoredTranscriptUuids } from '@/lib/storage'
 import { syncAvoma } from '@/lib/avoma'
 
 export const maxDuration = 300
@@ -12,7 +12,9 @@ export async function POST(req: Request) {
     }
 
     const sinceParam = new URL(req.url).searchParams.get('since')
-    const MAX_LOOKBACK_DAYS = 7
+    // Default cap: 1 day. Keeps Avoma API usage low on daily syncs.
+    // Pass ?since=YYYY-MM-DD explicitly for manual backfills.
+    const MAX_LOOKBACK_DAYS = 1
     const maxLookback = new Date()
     maxLookback.setDate(maxLookback.getDate() - MAX_LOOKBACK_DAYS)
     maxLookback.setHours(0, 0, 0, 0)
@@ -24,7 +26,8 @@ export async function POST(req: Request) {
         ? new Date(Math.max(new Date(lastSyncedAt).getTime(), maxLookback.getTime()))
         : maxLookback
 
-    const data = await syncAvoma(config.avoma.apiKey, since)
+    const knownUuids = await getStoredTranscriptUuids()
+    const data = await syncAvoma(config.avoma.apiKey, since, knownUuids)
     const merged = await mergeAvomaRaw(data)
 
     // Update last synced
