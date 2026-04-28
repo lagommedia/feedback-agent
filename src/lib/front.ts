@@ -106,6 +106,7 @@ async function fetchConversationPage(
   since: Date,
   internalEmails: string[],
   deadline?: number,
+  limit?: number,
 ): Promise<FrontRawConversation[]> {
   const conversations: FrontRawConversation[] = []
   const sinceTs = Math.floor(since.getTime() / 1000)
@@ -139,8 +140,12 @@ async function fetchConversationPage(
     conversations.push(...customerBatch)
 
     if (withinWindow.length < batch.length) {
-      // Hit the date boundary — no need to fetch further pages
       console.log(`[Front] Reached date boundary on page ${page}, stopping.`)
+      break
+    }
+
+    if (limit && conversations.length >= limit) {
+      console.log(`[Front] Reached per-call limit (${limit}) on page ${page}, stopping pagination.`)
       break
     }
 
@@ -157,6 +162,7 @@ async function fetchAllConversations(
   internalEmails: string[] = [],
   excludeInboxIds: string[] = [],
   deadline?: number,
+  limit?: number,
 ): Promise<FrontRawConversation[]> {
   const sinceDate = since ?? (() => {
     const d = new Date()
@@ -166,7 +172,7 @@ async function fetchAllConversations(
   })()
 
   // Always use the global /conversations endpoint — it properly respects q[after]
-  const all = await fetchConversationPage(token, `${BASE_URL}/conversations`, sinceDate, internalEmails, deadline)
+  const all = await fetchConversationPage(token, `${BASE_URL}/conversations`, sinceDate, internalEmails, deadline, limit)
 
   // Apply exclude inbox filter (post-filter — skip conversations from excluded inboxes)
   if (excludeInboxIds.length === 0) return all
@@ -229,13 +235,11 @@ export async function syncFront(
   since?: Date,
   internalEmails: string[] = [],
   excludeInboxIds: string[] = [],
-  limit?: number,  // cap how many conversations get messages fetched (for timeout safety)
+  limit?: number,  // stop paginating and fetching messages after this many qualifying conversations
   budgetMs?: number,  // total time budget; function returns partial results rather than exceeding it
 ): Promise<FrontRawData> {
   const deadline = budgetMs ? Date.now() + budgetMs : undefined
-  const allConversations = await fetchAllConversations(token, since, internalEmails, excludeInboxIds, deadline)
-  // If a limit is set, take the most recently-updated conversations first
-  const conversations = limit ? allConversations.slice(0, limit) : allConversations
+  const conversations = await fetchAllConversations(token, since, internalEmails, excludeInboxIds, deadline, limit)
 
   const allMessages: FrontRawMessage[] = []
   const CONCURRENCY = 5
