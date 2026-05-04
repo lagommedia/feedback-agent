@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react'
+import { toast } from 'sonner'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Card, CardContent } from '@/components/ui/card'
@@ -840,17 +841,31 @@ function FeedbackList() {
   }
 
   async function assignCompany(companyName: string, assignedTo: string | null) {
-    await fetch('/api/company-assignments', {
+    const res = await fetch('/api/company-assignments', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ companyName, assignedTo }),
     })
+    const data = await res.json()
+
     setCompanyAssignments(prev => {
       const next = { ...prev }
       if (!assignedTo) delete next[companyName]
       else next[companyName] = assignedTo
       return next
     })
+
+    // Bulk-assign unassigned tickets in local state immediately (no refetch needed)
+    if (assignedTo && data.ticketsAssigned > 0) {
+      setItems(prev => prev.map(item =>
+        item.customer === companyName && !item.assignedTo
+          ? { ...item, assignedTo }
+          : item
+      ))
+      toast.success(
+        `${data.ticketsAssigned} ticket${data.ticketsAssigned !== 1 ? 's' : ''} assigned to ${assignedTo}`
+      )
+    }
   }
 
   function startEdit(item: FeedbackItem) {

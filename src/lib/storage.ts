@@ -924,6 +924,27 @@ export async function setCompanyAssignment(companyName: string, assignedTo: stri
   }
 }
 
+/**
+ * Bulk-assigns all currently-unassigned tickets for a company to the given person.
+ * Tickets already manually assigned to someone are left untouched.
+ * Returns the number of tickets updated.
+ */
+export async function bulkAssignCompanyTickets(
+  companyName: string,
+  assignedTo: string,
+): Promise<number> {
+  await ensureSchema()
+  const pool = getPool()
+  const res = await pool.query(
+    `UPDATE feedback_items
+     SET data = data || jsonb_build_object('assignedTo', $2::text)
+     WHERE LOWER(data->>'customer') = LOWER($1)
+       AND (data->>'assignedTo' IS NULL OR data->>'assignedTo' = '')`,
+    [companyName, assignedTo],
+  )
+  return res.rowCount ?? 0
+}
+
 export async function getChargebeeCustomers(): Promise<ChargebeeCustomer[]> {
   await ensureSchema()
   const pool = getPool()
