@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
-import { readConfig, readFeedbackStore, upsertChurnScores } from '@/lib/storage'
+import { readConfig, readFeedbackStore, upsertChurnScores, getChargebeeCustomers } from '@/lib/storage'
 import type { ChurnScore } from '@/lib/storage'
 
 export const maxDuration = 300
@@ -17,11 +17,16 @@ export async function POST() {
     const { items } = await readFeedbackStore()
     if (items.length === 0) return NextResponse.json({ scored: 0 })
 
-    // Group items by company
+    // Load Chargebee customers to restrict scoring to real paying accounts
+    const chargebeeCustomers = await getChargebeeCustomers()
+    const chargebeeNames = new Set(chargebeeCustomers.map(c => c.companyName.toLowerCase()))
+
+    // Group items by company — only include verified Chargebee customers
     const byCompany = new Map<string, typeof items>()
     for (const item of items) {
       const key = item.customer || 'Unknown'
       if (key === 'Unknown') continue
+      if (!chargebeeNames.has(key.toLowerCase())) continue  // skip individuals/prospects
       if (!byCompany.has(key)) byCompany.set(key, [])
       byCompany.get(key)!.push(item)
     }

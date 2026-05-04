@@ -973,6 +973,8 @@ export async function upsertChurnScores(scores: ChurnScore[]): Promise<void> {
 
 export interface ChurnScoreDelta {
   companyName: string
+  arr: number           // annual recurring revenue from Chargebee
+  mrr: number
   initialScore: number
   initialConfidence: string
   initialReasoning: string
@@ -994,7 +996,6 @@ export async function getChurnScoreDeltas(): Promise<ChurnScoreDelta[]> {
   const pool = getPool()
 
   // Seed history from current scores for any company not yet in history
-  // (so existing scores show as the "baseline" on first re-compute)
   await pool.query(`
     INSERT INTO company_churn_score_history (company_name, score, confidence, reasoning, scored_at)
     SELECT cs.company_name, cs.score, cs.confidence, cs.reasoning, cs.scored_at
@@ -1024,35 +1025,41 @@ export async function getChurnScoreDeltas(): Promise<ChurnScoreDelta[]> {
     )
     SELECT
       f.company_name,
-      f.score            AS initial_score,
-      f.confidence       AS initial_confidence,
-      f.reasoning        AS initial_reasoning,
-      f.scored_at        AS initial_scored_at,
-      l.score            AS latest_score,
-      l.confidence       AS latest_confidence,
-      l.reasoning        AS latest_reasoning,
-      l.scored_at        AS latest_scored_at,
-      (l.score - f.score) AS delta,
+      COALESCE(cc.arr, 0)  AS arr,
+      COALESCE(cc.mrr, 0)  AS mrr,
+      f.score              AS initial_score,
+      f.confidence         AS initial_confidence,
+      f.reasoning          AS initial_reasoning,
+      f.scored_at          AS initial_scored_at,
+      l.score              AS latest_score,
+      l.confidence         AS latest_confidence,
+      l.reasoning          AS latest_reasoning,
+      l.scored_at          AS latest_scored_at,
+      (l.score - f.score)  AS delta,
       c.snapshot_count
     FROM first_scores f
-    JOIN latest_scores l USING (company_name)
-    JOIN counts c USING (company_name)
+    JOIN latest_scores  l USING (company_name)
+    JOIN counts         c USING (company_name)
+    -- Only include verified Chargebee customers — filters out individuals/prospects
+    JOIN chargebee_customers cc ON LOWER(cc.company_name) = LOWER(f.company_name)
     WHERE c.snapshot_count >= 2
     ORDER BY ABS(l.score - f.score) DESC, l.score DESC
   `)
 
   return res.rows.map((r) => ({
-    companyName: r.company_name,
-    initialScore: parseFloat(r.initial_score),
-    initialConfidence: r.initial_confidence,
-    initialReasoning: r.initial_reasoning ?? '',
-    initialScoredAt: r.initial_scored_at,
-    latestScore: parseFloat(r.latest_score),
-    latestConfidence: r.latest_confidence,
-    latestReasoning: r.latest_reasoning ?? '',
-    latestScoredAt: r.latest_scored_at,
-    delta: parseFloat(r.delta),
-    snapshotCount: parseInt(r.snapshot_count),
+    companyName:        r.company_name,
+    arr:                parseFloat(r.arr),
+    mrr:                parseFloat(r.mrr),
+    initialScore:       parseFloat(r.initial_score),
+    initialConfidence:  r.initial_confidence,
+    initialReasoning:   r.initial_reasoning ?? '',
+    initialScoredAt:    r.initial_scored_at,
+    latestScore:        parseFloat(r.latest_score),
+    latestConfidence:   r.latest_confidence,
+    latestReasoning:    r.latest_reasoning ?? '',
+    latestScoredAt:     r.latest_scored_at,
+    delta:              parseFloat(r.delta),
+    snapshotCount:      parseInt(r.snapshot_count),
   }))
 }
 

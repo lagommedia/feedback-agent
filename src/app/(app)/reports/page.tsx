@@ -15,6 +15,8 @@ import type { ReportRequest, FeedbackItem, WorkflowStatus } from '@/types'
 
 interface ChurnScoreDelta {
   companyName: string
+  arr: number
+  mrr: number
   initialScore: number
   initialConfidence: string
   initialReasoning: string
@@ -103,6 +105,20 @@ function ChurnRiskTrackerPanel() {
   const improving = deltas.filter(d => d.delta < 0).sort((a, b) => a.delta - b.delta)
   const unchanged = deltas.filter(d => d.delta === 0)
 
+  // Weighted ranking: delta × log(ARR+1000) × score level factor
+  // log scale on ARR prevents large accounts from totally dominating
+  function riskWeight(d: ChurnScoreDelta)        { return Math.abs(d.delta) * Math.log2((d.arr || 0) + 1000) * (1 + d.latestScore  / 100) }
+  function improvementWeight(d: ChurnScoreDelta) { return Math.abs(d.delta) * Math.log2((d.arr || 0) + 1000) * (1 + d.initialScore / 100) }
+
+  const top5Risk     = [...worsening].sort((a, b) => riskWeight(b)        - riskWeight(a)       ).slice(0, 5)
+  const top5Improve  = [...improving].sort((a, b) => improvementWeight(b) - improvementWeight(a)).slice(0, 5)
+
+  function fmtArr(arr: number) {
+    if (!arr) return null
+    if (arr >= 1000) return `$${(arr / 1000).toFixed(arr >= 10000 ? 0 : 1)}k ARR`
+    return `$${Math.round(arr)} ARR`
+  }
+
   function formatDate(iso: string) {
     return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   }
@@ -135,6 +151,7 @@ function ChurnRiskTrackerPanel() {
             <p className="text-[11px] text-muted-foreground mt-0.5">
               {formatDate(d.initialScoredAt)} → {formatDate(d.latestScoredAt)}
               <span className="ml-2 opacity-60">{d.snapshotCount} assessments</span>
+              {fmtArr(d.arr) && <span className="ml-2 opacity-60">· {fmtArr(d.arr)}</span>}
             </p>
           </div>
 
@@ -218,6 +235,71 @@ function ChurnRiskTrackerPanel() {
           {computing ? 'Computing…' : 'Reassess Now'}
         </Button>
       </div>
+
+      {/* Top 5 summary cards */}
+      {(top5Risk.length > 0 || top5Improve.length > 0) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
+          {/* Top 5 Increasing Risk */}
+          {top5Risk.length > 0 && (
+            <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-4">
+              <p className="text-[11px] font-bold text-red-400 uppercase tracking-wide flex items-center gap-1.5 mb-3">
+                <TrendingUp className="w-3.5 h-3.5" /> Top {top5Risk.length} Increasing Risk
+              </p>
+              <div className="space-y-2.5">
+                {top5Risk.map((d, i) => (
+                  <div key={d.companyName} className="flex items-start gap-2.5">
+                    <span className="text-[11px] font-bold text-red-400/60 w-4 shrink-0 mt-0.5">#{i + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-semibold truncate">{d.companyName}</span>
+                        <span className="text-xs font-bold text-red-400">+{d.delta} pts</span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                        <ScoreBar score={d.initialScore} />
+                        <span className="text-[10px] text-muted-foreground">→</span>
+                        <ScoreBar score={d.latestScore} />
+                        {fmtArr(d.arr) && (
+                          <span className="text-[10px] text-muted-foreground">· {fmtArr(d.arr)}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Top 5 Improving */}
+          {top5Improve.length > 0 && (
+            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-4">
+              <p className="text-[11px] font-bold text-emerald-400 uppercase tracking-wide flex items-center gap-1.5 mb-3">
+                <TrendingDown className="w-3.5 h-3.5" /> Top {top5Improve.length} Improving
+              </p>
+              <div className="space-y-2.5">
+                {top5Improve.map((d, i) => (
+                  <div key={d.companyName} className="flex items-start gap-2.5">
+                    <span className="text-[11px] font-bold text-emerald-400/60 w-4 shrink-0 mt-0.5">#{i + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-semibold truncate">{d.companyName}</span>
+                        <span className="text-xs font-bold text-emerald-400">−{Math.abs(d.delta)} pts</span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                        <ScoreBar score={d.initialScore} />
+                        <span className="text-[10px] text-muted-foreground">→</span>
+                        <ScoreBar score={d.latestScore} />
+                        {fmtArr(d.arr) && (
+                          <span className="text-[10px] text-muted-foreground">· {fmtArr(d.arr)}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {worsening.length > 0 && (
         <div className="space-y-2">
