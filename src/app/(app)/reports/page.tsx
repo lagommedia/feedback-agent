@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -27,6 +27,7 @@ interface ChurnScoreDelta {
   latestScoredAt: string
   delta: number
   snapshotCount: number
+  explanation?: string
 }
 
 function ScoreBar({ score }: { score: number }) {
@@ -60,6 +61,110 @@ function ConfidencePill({ conf }: { conf: string }) {
     </span>
   )
 }
+
+// ─── RiskRow: top-level so React can track identity across re-renders ─────────
+
+function fmtArr(arr: number) {
+  if (!arr) return null
+  if (arr >= 1000) return `$${(arr / 1000).toFixed(arr >= 10000 ? 0 : 1)}k ARR`
+  return `$${Math.round(arr)} ARR`
+}
+
+function RiskRow({
+  d, rank, accent, sign, isOpen, onToggle,
+}: {
+  d: ChurnScoreDelta
+  rank: number
+  accent: string
+  sign: string
+  isOpen: boolean
+  onToggle: () => void
+}) {
+  // Seed from DB-cached explanation if already available — no API call needed
+  const [explanation, setExplanation] = useState<string | null>(d.explanation ?? null)
+  const [loadingExpl, setLoadingExpl] = useState(false)
+  const hasFetched = useRef(!!d.explanation)
+
+  useEffect(() => {
+    if (!isOpen || hasFetched.current) return
+    hasFetched.current = true
+    setLoadingExpl(true)
+    fetch('/api/churn-scores/explain', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        companyName: d.companyName,
+        initialScore: d.initialScore,
+        initialReasoning: d.initialReasoning,
+        initialScoredAt: d.initialScoredAt,
+        latestScore: d.latestScore,
+        latestReasoning: d.latestReasoning,
+        latestScoredAt: d.latestScoredAt,
+        delta: d.delta,
+      }),
+    })
+      .then(r => r.json())
+      .then(data => setExplanation(data.explanation ?? null))
+      .catch(() => setExplanation(d.latestReasoning || d.initialReasoning || '—'))
+      .finally(() => setLoadingExpl(false))
+  }, [isOpen]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const absDelta = Math.abs(d.delta)
+  const isTop5 = rank <= 5
+
+  return (
+    <div className="border-b border-white/5 last:border-0">
+      <div
+        className="flex items-center gap-2.5 py-2.5 cursor-pointer hover:bg-white/5 rounded-lg px-1 -mx-1 transition-colors"
+        onClick={onToggle}
+      >
+        <span
+          className="text-[11px] font-bold w-5 shrink-0 text-right tabular-nums"
+          style={{ color: isTop5 ? accent : '#64748b' }}
+        >
+          #{rank}
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-sm font-semibold">{d.companyName}</span>
+            <span className="text-xs font-bold" style={{ color: accent }}>{sign}{absDelta} pts</span>
+          </div>
+          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+            <ScoreBar score={d.initialScore} />
+            <span className="text-[9px] text-muted-foreground">→</span>
+            <ScoreBar score={d.latestScore} />
+            {fmtArr(d.arr) && <span className="text-[10px] text-muted-foreground">· {fmtArr(d.arr)}</span>}
+          </div>
+        </div>
+        {isOpen
+          ? <ChevronUp   className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+          : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
+      </div>
+
+      {isOpen && (
+        <div className="pb-3 px-1">
+          <div className="rounded-lg bg-black/20 p-3">
+            <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide mb-1.5">
+              Why the score changed
+            </p>
+            {loadingExpl ? (
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Analyzing…
+              </div>
+            ) : (
+              <p className="text-xs text-foreground/80 leading-relaxed">
+                {explanation || '—'}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── ChurnRiskTrackerPanel ─────────────────────────────────────────────────────
 
 function ChurnRiskTrackerPanel() {
   const [deltas, setDeltas] = useState<ChurnScoreDelta[]>([])
@@ -113,66 +218,6 @@ function ChurnRiskTrackerPanel() {
   const allRisk    = [...worsening].sort((a, b) => riskWeight(b)        - riskWeight(a))
   const allImprove = [...improving].sort((a, b) => improvementWeight(b) - improvementWeight(a))
 
-  function fmtArr(arr: number) {
-    if (!arr) return null
-    if (arr >= 1000) return `$${(arr / 1000).toFixed(arr >= 10000 ? 0 : 1)}k ARR`
-    return `$${Math.round(arr)} ARR`
-  }
-
-  function formatDate(iso: string) {
-    return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-  }
-
-  function RiskRow({ d, rank, accent, sign }: { d: ChurnScoreDelta; rank: number; accent: string; sign: string }) {
-    const isOpen = expanded.has(d.companyName)
-    const absDelta = Math.abs(d.delta)
-    const isTop5 = rank <= 5
-
-    return (
-      <div className="border-b border-white/5 last:border-0">
-        <div
-          className="flex items-center gap-2.5 py-2.5 cursor-pointer hover:bg-white/5 rounded-lg px-1 -mx-1 transition-colors"
-          onClick={() => toggle(d.companyName)}
-        >
-          <span
-            className="text-[11px] font-bold w-5 shrink-0 text-right tabular-nums"
-            style={{ color: isTop5 ? accent : '#64748b' }}
-          >
-            #{rank}
-          </span>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-sm font-semibold">{d.companyName}</span>
-              <span className="text-xs font-bold" style={{ color: accent }}>{sign}{absDelta} pts</span>
-            </div>
-            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-              <ScoreBar score={d.initialScore} />
-              <span className="text-[9px] text-muted-foreground">→</span>
-              <ScoreBar score={d.latestScore} />
-              {fmtArr(d.arr) && <span className="text-[10px] text-muted-foreground">· {fmtArr(d.arr)}</span>}
-            </div>
-          </div>
-          {isOpen
-            ? <ChevronUp   className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-            : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
-        </div>
-
-        {isOpen && (
-          <div className="pb-3 px-1">
-            <div className="rounded-lg bg-black/20 p-3">
-              <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide mb-1.5">
-                Why the score changed
-              </p>
-              <p className="text-xs text-foreground/80 leading-relaxed">
-                {d.latestReasoning || d.initialReasoning || '—'}
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-    )
-  }
-
   if (loading) return (
     <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
       <Loader2 className="w-4 h-4 animate-spin" /> Loading churn risk history…
@@ -220,7 +265,8 @@ function ChurnRiskTrackerPanel() {
             </div>
             <div className="overflow-y-auto max-h-[480px] px-4 pb-4">
               {allRisk.map((d, i) => (
-                <RiskRow key={d.companyName} d={d} rank={i + 1} accent="#f87171" sign="+" />
+                <RiskRow key={d.companyName} d={d} rank={i + 1} accent="#f87171" sign="+"
+                  isOpen={expanded.has(d.companyName)} onToggle={() => toggle(d.companyName)} />
               ))}
             </div>
           </div>
@@ -237,7 +283,8 @@ function ChurnRiskTrackerPanel() {
             </div>
             <div className="overflow-y-auto max-h-[480px] px-4 pb-4">
               {allImprove.map((d, i) => (
-                <RiskRow key={d.companyName} d={d} rank={i + 1} accent="#34d399" sign="−" />
+                <RiskRow key={d.companyName} d={d} rank={i + 1} accent="#34d399" sign="−"
+                  isOpen={expanded.has(d.companyName)} onToggle={() => toggle(d.companyName)} />
               ))}
             </div>
           </div>

@@ -144,6 +144,9 @@ async function ensureSchema(): Promise<void> {
     ALTER TABLE app_users ADD COLUMN IF NOT EXISTS permissions
       JSONB NOT NULL DEFAULT '["dashboard","integrations","feedback","chat","reports","users"]'::jsonb;
   `)
+  await pool.query(`
+    ALTER TABLE company_churn_scores ADD COLUMN IF NOT EXISTS explanation TEXT;
+  `)
 
   _schemaReady = true
 }
@@ -953,13 +956,14 @@ export async function upsertChurnScores(scores: ChurnScore[]): Promise<void> {
   for (const s of scores) {
     // Upsert the current (latest) score
     await pool.query(
-      `INSERT INTO company_churn_scores (company_name, score, confidence, reasoning, scored_at)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO company_churn_scores (company_name, score, confidence, reasoning, scored_at, explanation)
+       VALUES ($1, $2, $3, $4, $5, NULL)
        ON CONFLICT (company_name) DO UPDATE SET
          score = EXCLUDED.score,
          confidence = EXCLUDED.confidence,
          reasoning = EXCLUDED.reasoning,
-         scored_at = EXCLUDED.scored_at`,
+         scored_at = EXCLUDED.scored_at,
+         explanation = NULL`,
       [s.companyName, s.score, s.confidence, s.reasoning, now],
     )
     // Append to history — keeps every snapshot for before/after tracking
@@ -969,6 +973,48 @@ export async function upsertChurnScores(scores: ChurnScore[]): Promise<void> {
       [s.companyName, s.score, s.confidence, s.reasoning, now],
     )
   }
+}
+
+export async function getCompanyReps(companyName: string): Promise<string[]> {
+  await ensureSchema()
+  const pool = getPool()
+  // Cross-reference against app_users so we only return actual Zeni team members.
+  // Extracts the first name segment from each user's email (e.g. "ben.ashworth@zeni.ai" → "ben")
+  // and checks whether the rep name in feedback contains it — filters out customer contacts.
+  const res = await pool.query(
+    `SELECT DISTINCT fi.data->>'rep' AS rep
+     FROM feedback_items fi
+     WHERE LOWER(fi.data->>'customer') = LOWER($1)
+       AND fi.data->>'rep' IS NOT NULL
+       AND fi.data->>'rep' != 'Unknown'
+       AND EXISTS (
+         SELECT 1 FROM app_users au
+         WHERE LOWER(fi.data->>'rep') ILIKE
+           '%' || SPLIT_PART(SPLIT_PART(LOWER(au.email), '@', 1), '.', 1) || '%'
+       )
+     LIMIT 5`,
+    [companyName],
+  )
+  return res.rows.map((r: { rep: string }) => r.rep).filter(Boolean)
+}
+
+export async function getChurnExplanation(companyName: string): Promise<string | null> {
+  await ensureSchema()
+  const pool = getPool()
+  const res = await pool.query(
+    `SELECT explanation FROM company_churn_scores WHERE LOWER(company_name) = LOWER($1)`,
+    [companyName],
+  )
+  return res.rows[0]?.explanation ?? null
+}
+
+export async function cacheChurnExplanation(companyName: string, explanation: string): Promise<void> {
+  await ensureSchema()
+  const pool = getPool()
+  await pool.query(
+    `UPDATE company_churn_scores SET explanation = $1 WHERE LOWER(company_name) = LOWER($2)`,
+    [explanation, companyName],
+  )
 }
 
 export interface ChurnScoreDelta {
@@ -985,6 +1031,7 @@ export interface ChurnScoreDelta {
   latestScoredAt: string
   delta: number          // positive = worsening risk, negative = improving
   snapshotCount: number
+  explanation?: string   // AI-generated "why the score changed" — cached in DB
 }
 
 /**
@@ -1036,12 +1083,15 @@ export async function getChurnScoreDeltas(): Promise<ChurnScoreDelta[]> {
       l.reasoning          AS latest_reasoning,
       l.scored_at          AS latest_scored_at,
       (l.score - f.score)  AS delta,
-      c.snapshot_count
+      c.snapshot_count,
+      cs.explanation
     FROM first_scores f
     JOIN latest_scores  l USING (company_name)
     JOIN counts         c USING (company_name)
     -- Only include verified Chargebee customers — filters out individuals/prospects
     JOIN chargebee_customers cc ON LOWER(cc.company_name) = LOWER(f.company_name)
+    -- Pull cached explanation from latest score row
+    LEFT JOIN company_churn_scores cs ON LOWER(cs.company_name) = LOWER(f.company_name)
     WHERE c.snapshot_count >= 2
     ORDER BY ABS(l.score - f.score) DESC, l.score DESC
   `)
@@ -1060,6 +1110,7 @@ export async function getChurnScoreDeltas(): Promise<ChurnScoreDelta[]> {
     latestScoredAt:     r.latest_scored_at,
     delta:              parseFloat(r.delta),
     snapshotCount:      parseInt(r.snapshot_count),
+    explanation:        r.explanation ?? undefined,
   }))
 }
 
