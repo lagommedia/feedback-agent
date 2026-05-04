@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import { FileText, Download, Loader2, Copy, ChevronDown, ChevronUp, Users, TrendingUp, TrendingDown, Minus, Activity, RefreshCw } from 'lucide-react'
+import { FileText, Download, Loader2, Copy, ChevronDown, ChevronUp, Users, TrendingUp, TrendingDown, Minus, Activity, RefreshCw, ExternalLink } from 'lucide-react'
+import Link from 'next/link'
 import ReactMarkdown from 'react-markdown'
 import type { ReportRequest, FeedbackItem, WorkflowStatus } from '@/types'
 
@@ -157,6 +158,13 @@ function RiskRow({
                 {explanation || '—'}
               </p>
             )}
+            <Link
+              href={`/feedback?customer=${encodeURIComponent(d.companyName)}`}
+              className="inline-flex items-center gap-1 mt-2 text-[10px] font-medium text-primary/70 hover:text-primary transition-colors"
+            >
+              <ExternalLink className="w-3 h-3" />
+              View feedback items
+            </Link>
           </div>
         </div>
       )}

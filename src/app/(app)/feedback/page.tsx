@@ -813,7 +813,7 @@ function FeedbackList() {
   const [currentUser, setCurrentUser] = useState<string | null>(null)
   const [users, setUsers] = useState<{ email: string }[]>([])
   const [assignedToFilter, setAssignedToFilter] = useState<string>('')
-  const [companyFilter, setCompanyFilter] = useState<string>('')
+  const [companyFilter, setCompanyFilter] = useState<string>(searchParams.get('customer') ?? '')
   const [sourceFilter, setSourceFilter] = useState<string>('')
   const [sortBy, setSortBy] = useState<string>('date_desc')
   const [allCustomers, setAllCustomers] = useState<string[]>([])
