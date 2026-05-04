@@ -66,11 +66,15 @@ const AUTOMATED_SUBJECT_PATTERNS = [
   /^confirm your/i,
   /^welcome to/i,
   /^you have been (added|invited)/i,
+  /you've been assigned/i,
+  /you have been assigned/i,
   /^\[?notification\]?:/i,
   /^security alert/i,
   /^action required:/i,
   /newsletter/i,
   /^unsubscribe/i,
+  /advance your.{0,20}career/i,
+  /career.{0,20}advance/i,
 ]
 
 function isCustomerConversation(

@@ -638,6 +638,13 @@ export async function getUnanalyzedFrontConversations(limit = 75): Promise<{
   const convRes = await pool.query(
     `SELECT fc.data
      FROM front_conversations fc
+     -- Must have messages with real content (filters out 1-line system notifications)
+     JOIN (
+       SELECT data->>'conversationId' AS conv_id,
+              SUM(length(COALESCE(data->>'text', ''))) AS total_text
+       FROM front_messages
+       GROUP BY data->>'conversationId'
+     ) msg ON msg.conv_id = fc.id AND msg.total_text > 300
      WHERE NOT EXISTS (
        SELECT 1 FROM feedback_items fi
        WHERE fi.data->>'rawSourceId' = fc.id
@@ -646,6 +653,14 @@ export async function getUnanalyzedFrontConversations(limit = 75): Promise<{
          SELECT 1 FROM analyzed_sources ans
          WHERE ans.source_id = fc.id
        )
+       -- Filter known noise subjects at DB level
+       AND fc.data->>'subject' NOT ILIKE '%you''ve been assigned%'
+       AND fc.data->>'subject' NOT ILIKE '%advance your%career%'
+       AND fc.data->>'subject' NOT ILIKE '%newsletter%'
+       AND fc.data->>'subject' NOT ILIKE '%unsubscribe%'
+       AND fc.data->>'subject' NOT ILIKE '%out of office%'
+       AND fc.data->>'subject' NOT ILIKE '%automatic reply%'
+       AND fc.data->>'subject' NOT ILIKE '%delivery failure%'
      ORDER BY (fc.data->>'created_at')::float ASC
      LIMIT $1`,
     [limit]
@@ -674,8 +689,21 @@ export async function getUnanalyzedCounts(): Promise<{ avoma: number; front: num
         AND NOT (at.data->>'meetingTitle' ~* 'Call with .+ \\(\\+?1?[0-9]{10,11}\\)')
         AND jsonb_array_length(at.data->'segments') >= 8`),
     pool.query(`SELECT COUNT(*) FROM front_conversations fc
+      JOIN (
+        SELECT data->>'conversationId' AS conv_id,
+               SUM(length(COALESCE(data->>'text', ''))) AS total_text
+        FROM front_messages
+        GROUP BY data->>'conversationId'
+      ) msg ON msg.conv_id = fc.id AND msg.total_text > 300
       WHERE NOT EXISTS (SELECT 1 FROM feedback_items fi WHERE fi.data->>'rawSourceId' = fc.id)
-        AND NOT EXISTS (SELECT 1 FROM analyzed_sources ans WHERE ans.source_id = fc.id)`),
+        AND NOT EXISTS (SELECT 1 FROM analyzed_sources ans WHERE ans.source_id = fc.id)
+        AND fc.data->>'subject' NOT ILIKE '%you''ve been assigned%'
+        AND fc.data->>'subject' NOT ILIKE '%advance your%career%'
+        AND fc.data->>'subject' NOT ILIKE '%newsletter%'
+        AND fc.data->>'subject' NOT ILIKE '%unsubscribe%'
+        AND fc.data->>'subject' NOT ILIKE '%out of office%'
+        AND fc.data->>'subject' NOT ILIKE '%automatic reply%'
+        AND fc.data->>'subject' NOT ILIKE '%delivery failure%'`),
   ])
   return {
     avoma: parseInt(avoma.rows[0].count),
