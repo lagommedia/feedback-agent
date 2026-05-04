@@ -620,7 +620,7 @@ export async function getUnanalyzedAvomaTranscripts(limit = 100): Promise<import
          SELECT 1 FROM analyzed_sources ans
          WHERE ans.source_id = at.meeting_uuid
        )
-       AND NOT (at.data->>'meetingTitle' ~* 'Call with .+ \\(\\+?1?[0-9]{10,11}\\)')
+       AND at.data->>'meetingTitle' NOT ILIKE 'Call with %'
        AND jsonb_array_length(at.data->'segments') >= 8
      ORDER BY (at.data->>'date') DESC
      LIMIT $1`,
@@ -686,7 +686,7 @@ export async function getUnanalyzedCounts(): Promise<{ avoma: number; front: num
     pool.query(`SELECT COUNT(*) FROM avoma_transcripts at
       WHERE NOT EXISTS (SELECT 1 FROM feedback_items fi WHERE fi.data->>'rawSourceId' = at.meeting_uuid)
         AND NOT EXISTS (SELECT 1 FROM analyzed_sources ans WHERE ans.source_id = at.meeting_uuid)
-        AND NOT (at.data->>'meetingTitle' ~* 'Call with .+ \\(\\+?1?[0-9]{10,11}\\)')
+        AND at.data->>'meetingTitle' NOT ILIKE 'Call with %'
         AND jsonb_array_length(at.data->'segments') >= 8`),
     pool.query(`SELECT COUNT(*) FROM front_conversations fc
       JOIN (
