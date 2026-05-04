@@ -7,9 +7,247 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import { FileText, Download, Loader2, Copy, ChevronDown, ChevronUp, Users } from 'lucide-react'
+import { FileText, Download, Loader2, Copy, ChevronDown, ChevronUp, Users, TrendingUp, TrendingDown, Minus, Activity, RefreshCw } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import type { ReportRequest, FeedbackItem, WorkflowStatus } from '@/types'
+
+// ─── Churn Risk Tracker ────────────────────────────────────────────────────────
+
+interface ChurnScoreDelta {
+  companyName: string
+  initialScore: number
+  initialConfidence: string
+  initialReasoning: string
+  initialScoredAt: string
+  latestScore: number
+  latestConfidence: string
+  latestReasoning: string
+  latestScoredAt: string
+  delta: number
+  snapshotCount: number
+}
+
+function ScoreBar({ score }: { score: number }) {
+  const color = score >= 65 ? '#ef4444' : score >= 35 ? '#f59e0b' : '#22c55e'
+  return (
+    <div className="flex items-center gap-2">
+      <div
+        className="relative w-16 h-1.5 rounded-full overflow-visible shrink-0"
+        style={{ background: 'linear-gradient(to right, #22c55e 0%, #f59e0b 50%, #ef4444 100%)' }}
+      >
+        <div
+          className="absolute -top-[3px] w-[3px] h-[9px] rounded-full bg-white shadow-[0_0_3px_rgba(0,0,0,0.5)]"
+          style={{ left: `clamp(0%,${score}%,100%)`, transform: 'translateX(-50%)' }}
+        />
+      </div>
+      <span className="text-xs font-bold tabular-nums w-6 text-right" style={{ color }}>{score}</span>
+    </div>
+  )
+}
+
+function ConfidencePill({ conf }: { conf: string }) {
+  const map: Record<string, { bg: string; text: string; label: string }> = {
+    high:   { bg: 'rgba(34,197,94,0.12)',  text: '#4ade80', label: 'High' },
+    medium: { bg: 'rgba(245,158,11,0.12)', text: '#fbbf24', label: 'Med' },
+    low:    { bg: 'rgba(148,163,184,0.1)', text: '#94a3b8', label: 'Low' },
+  }
+  const c = map[conf] ?? map.low
+  return (
+    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: c.bg, color: c.text }}>
+      {c.label}
+    </span>
+  )
+}
+
+function ChurnRiskTrackerPanel() {
+  const [deltas, setDeltas] = useState<ChurnScoreDelta[]>([])
+  const [loading, setLoading] = useState(true)
+  const [computing, setComputing] = useState(false)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  function load() {
+    setLoading(true)
+    fetch('/api/churn-scores/history')
+      .then(r => r.json())
+      .then(d => setDeltas(d.deltas ?? []))
+      .catch(() => toast.error('Failed to load churn score history'))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => { load() }, [])
+
+  function toggle(name: string) {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      next.has(name) ? next.delete(name) : next.add(name)
+      return next
+    })
+  }
+
+  async function computeScores() {
+    setComputing(true)
+    try {
+      const res = await fetch('/api/churn-scores/compute', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) { toast.error(data.error ?? 'Failed to compute scores'); return }
+      toast.success(`Computed scores for ${data.scored} companies`)
+      load()
+    } catch (err) {
+      toast.error(String(err))
+    } finally {
+      setComputing(false)
+    }
+  }
+
+  const worsening = deltas.filter(d => d.delta > 0).sort((a, b) => b.delta - a.delta)
+  const improving = deltas.filter(d => d.delta < 0).sort((a, b) => a.delta - b.delta)
+  const unchanged = deltas.filter(d => d.delta === 0)
+
+  function formatDate(iso: string) {
+    return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  }
+
+  function DeltaRow({ d }: { d: ChurnScoreDelta }) {
+    const isOpen = expanded.has(d.companyName)
+    const isWorse = d.delta > 0
+    const isBetter = d.delta < 0
+    const absDelta = Math.abs(d.delta)
+
+    return (
+      <div className="rounded-lg border border-border overflow-hidden">
+        <div
+          className="flex items-center gap-3 px-4 py-3 bg-muted/20 hover:bg-muted/40 cursor-pointer transition-colors"
+          onClick={() => toggle(d.companyName)}
+        >
+          {/* Trend icon */}
+          <div className={cn(
+            'w-7 h-7 rounded-full flex items-center justify-center shrink-0',
+            isWorse  ? 'bg-red-500/15'     : isBetter ? 'bg-emerald-500/15' : 'bg-muted/40'
+          )}>
+            {isWorse  ? <TrendingUp   className="w-3.5 h-3.5 text-red-400" /> :
+             isBetter ? <TrendingDown className="w-3.5 h-3.5 text-emerald-400" /> :
+                        <Minus        className="w-3.5 h-3.5 text-muted-foreground" />}
+          </div>
+
+          {/* Company name */}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold truncate">{d.companyName}</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {formatDate(d.initialScoredAt)} → {formatDate(d.latestScoredAt)}
+              <span className="ml-2 opacity-60">{d.snapshotCount} assessments</span>
+            </p>
+          </div>
+
+          {/* Score comparison */}
+          <div className="flex items-center gap-4 shrink-0">
+            <div className="text-right hidden sm:block">
+              <p className="text-[10px] text-muted-foreground mb-1">Initial</p>
+              <ScoreBar score={d.initialScore} />
+            </div>
+            <div className="flex flex-col items-center">
+              <span className={cn(
+                'text-xs font-bold tabular-nums',
+                isWorse ? 'text-red-400' : isBetter ? 'text-emerald-400' : 'text-muted-foreground'
+              )}>
+                {isWorse ? '+' : isBetter ? '−' : '±'}{absDelta}
+              </span>
+              <span className="text-[9px] text-muted-foreground">pts</span>
+            </div>
+            <div className="text-right">
+              <p className="text-[10px] text-muted-foreground mb-1">Current</p>
+              <ScoreBar score={d.latestScore} />
+            </div>
+            {isOpen ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+          </div>
+        </div>
+
+        {/* Expanded reasoning */}
+        {isOpen && (
+          <div className="px-4 py-3 bg-muted/10 border-t border-border/50 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
+                Baseline Assessment <ConfidencePill conf={d.initialConfidence} />
+                <span className="text-[9px] normal-case font-normal opacity-60">{formatDate(d.initialScoredAt)}</span>
+              </p>
+              <p className="text-sm text-foreground/80 leading-relaxed">{d.initialReasoning || '—'}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
+                Latest Assessment <ConfidencePill conf={d.latestConfidence} />
+                <span className="text-[9px] normal-case font-normal opacity-60">{formatDate(d.latestScoredAt)}</span>
+              </p>
+              <p className="text-sm text-foreground/80 leading-relaxed">{d.latestReasoning || '—'}</p>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (loading) return (
+    <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+      <Loader2 className="w-4 h-4 animate-spin" /> Loading churn risk history…
+    </div>
+  )
+
+  if (deltas.length === 0) return (
+    <div className="rounded-lg border border-dashed border-border p-6 text-center space-y-3">
+      <p className="text-sm text-muted-foreground">
+        No reassessments yet. Run <strong>Compute Scores</strong> below to set a baseline, then run it again after
+        customer follow-ups to track risk changes.
+      </p>
+      <Button onClick={computeScores} disabled={computing} className="gap-2">
+        {computing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+        {computing ? 'Computing…' : 'Compute Scores Now'}
+      </Button>
+    </div>
+  )
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          {deltas.length} compan{deltas.length === 1 ? 'y' : 'ies'} reassessed ·{' '}
+          <span className="text-red-400 font-medium">{worsening.length} worsening</span>
+          {' · '}
+          <span className="text-emerald-400 font-medium">{improving.length} improving</span>
+          {unchanged.length > 0 && <span className="text-muted-foreground"> · {unchanged.length} unchanged</span>}
+        </p>
+        <Button size="sm" variant="outline" onClick={computeScores} disabled={computing} className="gap-1.5 h-8">
+          {computing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+          {computing ? 'Computing…' : 'Reassess Now'}
+        </Button>
+      </div>
+
+      {worsening.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[11px] font-semibold text-red-400 uppercase tracking-wide flex items-center gap-1.5">
+            <TrendingUp className="w-3.5 h-3.5" /> Increasing Risk ({worsening.length})
+          </p>
+          {worsening.map(d => <DeltaRow key={d.companyName} d={d} />)}
+        </div>
+      )}
+
+      {improving.length > 0 && (
+        <div className="space-y-2 mt-4">
+          <p className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wide flex items-center gap-1.5">
+            <TrendingDown className="w-3.5 h-3.5" /> Improving ({improving.length})
+          </p>
+          {improving.map(d => <DeltaRow key={d.companyName} d={d} />)}
+        </div>
+      )}
+
+      {unchanged.length > 0 && (
+        <div className="space-y-2 mt-4">
+          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+            <Minus className="w-3.5 h-3.5" /> Unchanged ({unchanged.length})
+          </p>
+          {unchanged.map(d => <DeltaRow key={d.companyName} d={d} />)}
+        </div>
+      )}
+    </div>
+  )
+}
 
 const STAGE_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
   reviewed:    { label: 'Reviewed',    color: 'text-violet-400',  bg: 'bg-violet-500/10 border border-violet-500/20' },
@@ -327,6 +565,19 @@ export default function ReportsPage() {
           <h2 className="text-lg font-semibold">Team Assignments</h2>
         </div>
         <TeamAssignmentsPanel />
+      </div>
+
+      {/* Churn Risk Tracker */}
+      <div className="mb-10">
+        <div className="flex items-center gap-2 mb-1">
+          <Activity className="w-5 h-5 text-red-400" />
+          <h2 className="text-lg font-semibold">Churn Risk Tracker</h2>
+        </div>
+        <p className="text-sm text-muted-foreground mb-4">
+          Track how churn risk changes between assessments. Run <strong>Compute Scores</strong> on the Integrations page
+          before and after customer follow-ups to measure the impact of your actions.
+        </p>
+        <ChurnRiskTrackerPanel />
       </div>
 
       <div className="mb-6">

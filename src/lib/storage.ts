@@ -128,6 +128,15 @@ async function ensureSchema(): Promise<void> {
       reasoning TEXT,
       scored_at TIMESTAMPTZ DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS company_churn_score_history (
+      id SERIAL PRIMARY KEY,
+      company_name TEXT NOT NULL,
+      score NUMERIC NOT NULL,
+      confidence TEXT NOT NULL,
+      reasoning TEXT,
+      scored_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_csh_company_scored ON company_churn_score_history(company_name, scored_at);
   `)
 
   // Column migrations — run separately so a no-op ALTER doesn't abort the block above
@@ -940,18 +949,111 @@ export async function upsertChurnScores(scores: ChurnScore[]): Promise<void> {
   await ensureSchema()
   if (scores.length === 0) return
   const pool = getPool()
+  const now = new Date()
   for (const s of scores) {
+    // Upsert the current (latest) score
     await pool.query(
       `INSERT INTO company_churn_scores (company_name, score, confidence, reasoning, scored_at)
-       VALUES ($1, $2, $3, $4, NOW())
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (company_name) DO UPDATE SET
          score = EXCLUDED.score,
          confidence = EXCLUDED.confidence,
          reasoning = EXCLUDED.reasoning,
-         scored_at = NOW()`,
-      [s.companyName, s.score, s.confidence, s.reasoning],
+         scored_at = EXCLUDED.scored_at`,
+      [s.companyName, s.score, s.confidence, s.reasoning, now],
+    )
+    // Append to history — keeps every snapshot for before/after tracking
+    await pool.query(
+      `INSERT INTO company_churn_score_history (company_name, score, confidence, reasoning, scored_at)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [s.companyName, s.score, s.confidence, s.reasoning, now],
     )
   }
+}
+
+export interface ChurnScoreDelta {
+  companyName: string
+  initialScore: number
+  initialConfidence: string
+  initialReasoning: string
+  initialScoredAt: string
+  latestScore: number
+  latestConfidence: string
+  latestReasoning: string
+  latestScoredAt: string
+  delta: number          // positive = worsening risk, negative = improving
+  snapshotCount: number
+}
+
+/**
+ * Returns companies that have been scored at least twice, showing the
+ * first (baseline) vs latest score so you can track risk changes over time.
+ */
+export async function getChurnScoreDeltas(): Promise<ChurnScoreDelta[]> {
+  await ensureSchema()
+  const pool = getPool()
+
+  // Seed history from current scores for any company not yet in history
+  // (so existing scores show as the "baseline" on first re-compute)
+  await pool.query(`
+    INSERT INTO company_churn_score_history (company_name, score, confidence, reasoning, scored_at)
+    SELECT cs.company_name, cs.score, cs.confidence, cs.reasoning, cs.scored_at
+    FROM company_churn_scores cs
+    WHERE NOT EXISTS (
+      SELECT 1 FROM company_churn_score_history h WHERE h.company_name = cs.company_name
+    )
+  `)
+
+  const res = await pool.query(`
+    WITH first_scores AS (
+      SELECT DISTINCT ON (company_name)
+        company_name, score, confidence, reasoning, scored_at
+      FROM company_churn_score_history
+      ORDER BY company_name, scored_at ASC
+    ),
+    latest_scores AS (
+      SELECT DISTINCT ON (company_name)
+        company_name, score, confidence, reasoning, scored_at
+      FROM company_churn_score_history
+      ORDER BY company_name, scored_at DESC
+    ),
+    counts AS (
+      SELECT company_name, COUNT(*) AS snapshot_count
+      FROM company_churn_score_history
+      GROUP BY company_name
+    )
+    SELECT
+      f.company_name,
+      f.score            AS initial_score,
+      f.confidence       AS initial_confidence,
+      f.reasoning        AS initial_reasoning,
+      f.scored_at        AS initial_scored_at,
+      l.score            AS latest_score,
+      l.confidence       AS latest_confidence,
+      l.reasoning        AS latest_reasoning,
+      l.scored_at        AS latest_scored_at,
+      (l.score - f.score) AS delta,
+      c.snapshot_count
+    FROM first_scores f
+    JOIN latest_scores l USING (company_name)
+    JOIN counts c USING (company_name)
+    WHERE c.snapshot_count >= 2
+    ORDER BY ABS(l.score - f.score) DESC, l.score DESC
+  `)
+
+  return res.rows.map((r) => ({
+    companyName: r.company_name,
+    initialScore: parseFloat(r.initial_score),
+    initialConfidence: r.initial_confidence,
+    initialReasoning: r.initial_reasoning ?? '',
+    initialScoredAt: r.initial_scored_at,
+    latestScore: parseFloat(r.latest_score),
+    latestConfidence: r.latest_confidence,
+    latestReasoning: r.latest_reasoning ?? '',
+    latestScoredAt: r.latest_scored_at,
+    delta: parseFloat(r.delta),
+    snapshotCount: parseInt(r.snapshot_count),
+  }))
 }
 
 export async function getChurnScores(): Promise<Record<string, ChurnScore>> {
