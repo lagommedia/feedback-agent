@@ -159,19 +159,13 @@ function ChurnRiskTrackerPanel() {
 
         {isOpen && (
           <div className="pb-3 px-1">
-            <div className="rounded-lg bg-black/20 p-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide mb-1.5 flex items-center gap-1">
-                  Baseline · {formatDate(d.initialScoredAt)} <ConfidencePill conf={d.initialConfidence} />
-                </p>
-                <p className="text-xs text-foreground/80 leading-relaxed">{d.initialReasoning || '—'}</p>
-              </div>
-              <div>
-                <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide mb-1.5 flex items-center gap-1">
-                  Latest · {formatDate(d.latestScoredAt)} <ConfidencePill conf={d.latestConfidence} />
-                </p>
-                <p className="text-xs text-foreground/80 leading-relaxed">{d.latestReasoning || '—'}</p>
-              </div>
+            <div className="rounded-lg bg-black/20 p-3">
+              <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide mb-1.5">
+                Why the score changed
+              </p>
+              <p className="text-xs text-foreground/80 leading-relaxed">
+                {d.latestReasoning || d.initialReasoning || '—'}
+              </p>
             </div>
           </div>
         )}
