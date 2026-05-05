@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { NextResponse } from 'next/server'
 import { getCompanyAssignments, setCompanyAssignment, bulkAssignCompanyTickets } from '@/lib/storage'
 

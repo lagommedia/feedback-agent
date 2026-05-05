@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { NextRequest, NextResponse } from 'next/server'
 import { verifySessionToken, COOKIE_NAME } from '@/lib/auth'
 import { getUserPermissions, ALL_PERMISSIONS } from '@/lib/storage'

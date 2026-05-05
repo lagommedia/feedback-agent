@@ -75,6 +75,8 @@ function typeIcon(type: FeedbackItem['type']) {
   return <Lightbulb className="w-3 h-3" style={{ color: RH.feature }} />
 }
 
+export const dynamic = 'force-dynamic'
+
 export default async function DashboardPage({
   searchParams,
 }: {

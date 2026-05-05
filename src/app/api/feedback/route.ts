@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { NextRequest, NextResponse } from 'next/server'
 import { readFeedbackStore, writeFeedbackStore } from '@/lib/storage'
 import type { FeedbackItem, FeedbackSource, FeedbackType, UrgencyLevel, AppType } from '@/types'
