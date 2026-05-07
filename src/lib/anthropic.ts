@@ -246,7 +246,7 @@ async function analyzeChunk(
   for (let attempt = 0; attempt <= CHUNK_RETRY_DELAYS_MS.length; attempt++) {
     try {
       response = await client.messages.create({
-        model: 'claude-sonnet-4-6',
+        model: 'claude-3-5-haiku-20241022',
         max_tokens: 8192,
         system: systemPrompt,
         messages: [{ role: 'user', content: userContent }],

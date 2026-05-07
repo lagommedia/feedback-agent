@@ -15,6 +15,16 @@ import type { FeedbackItem } from '@/types'
 
 export const maxDuration = 300
 
+/** Lightweight status check — returns remaining queue counts without running any analysis. */
+export async function GET() {
+  try {
+    const remaining = await getUnanalyzedCounts()
+    return NextResponse.json({ remaining })
+  } catch (err) {
+    return NextResponse.json({ error: String(err) }, { status: 500 })
+  }
+}
+
 export async function POST() {
   try {
     const config = await readConfig()
