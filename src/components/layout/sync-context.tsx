@@ -65,7 +65,15 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     while (iteration < MAX_ITERATIONS) {
       iteration++
       try {
-        const analyzeRes = await fetch('/api/analyze', { method: 'POST' })
+        // Abort if the Vercel function doesn't respond within 270s (its limit is 300s)
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 270_000)
+        let analyzeRes: Response
+        try {
+          analyzeRes = await fetch('/api/analyze', { method: 'POST', signal: controller.signal })
+        } finally {
+          clearTimeout(timeoutId)
+        }
         const analyzeData = await analyzeRes.json()
         if (!analyzeRes.ok) throw new Error(analyzeData.error ?? 'Analysis failed')
 
