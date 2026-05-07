@@ -28,16 +28,19 @@ export async function POST(req: Request) {
 
     const knownUuids = await getStoredTranscriptUuids()
     const data = await syncAvoma(config.avoma.apiKey, since, knownUuids)
-    const merged = await mergeAvomaRaw(data)
+    await mergeAvomaRaw(data)
 
     // Update last synced
     const updatedConfig = { ...config, avoma: { ...config.avoma, lastSyncedAt: new Date().toISOString() } }
     await writeConfig(updatedConfig)
 
+    // data.transcripts contains only NEW transcripts fetched this run (knownUuids filtered the rest).
+    // merged.transcripts.length would return the entire DB total — don't use that here.
     return NextResponse.json({
       source: 'avoma',
       status: 'success',
-      count: merged.transcripts.length,
+      count: data.transcripts.length,
+      totalInDb: knownUuids.size + data.transcripts.length,
     })
   } catch (err) {
     console.error('Avoma sync error:', err)
