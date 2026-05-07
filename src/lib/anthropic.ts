@@ -384,7 +384,19 @@ export async function analyzeAllContent(
       await new Promise((res) => setTimeout(res, INTER_BATCH_DELAY_MS))
     }
     const batch = allItems.slice(i, i + BATCH_SIZE)
-    const results = await analyzeChunk(client, batch, systemPrompt)
+    let results: FeedbackItem[] | null
+
+    try {
+      results = await analyzeChunk(client, batch, systemPrompt)
+    } catch (err) {
+      if (isRetryableApiError(err)) {
+        // 529 / rate-limit on this batch — skip it without marking so it's retried next run.
+        // Continue to the next batch rather than aborting the whole run.
+        console.warn(`[analyzeAllContent] Retryable error on batch ${i / BATCH_SIZE + 1}, skipping:`, String(err))
+        continue
+      }
+      throw err // non-retryable (credits exhausted, etc.) — stop the run
+    }
 
     if (results === null) {
       // JSON parse failure — do NOT mark as analyzed so the batch is retried next run.
