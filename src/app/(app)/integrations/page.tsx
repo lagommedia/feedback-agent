@@ -31,6 +31,7 @@ export default function IntegrationsPage() {
   const [chargebeeSyncing, setChargebeeSyncing] = useState(false)
   const [chargebeeLastSynced, setChargebeeLastSynced] = useState<string | undefined>()
   const [normalizing, setNormalizing] = useState(false)
+  const [requeueing, setRequeueing] = useState(false)
   const [saving, setSaving] = useState<string | null>(null)
   const [computingScores, setComputingScores] = useState(false)
   const [lastChurnScoredAt, setLastChurnScoredAt] = useState<string | undefined>()
@@ -127,6 +128,23 @@ export default function IntegrationsPage() {
       toast.error(`Failed to save: ${String(err)}`)
     } finally {
       setSaving(null)
+    }
+  }
+
+  async function requeueMeetings() {
+    setRequeueing(true)
+    try {
+      const res = await fetch('/api/admin/requeue-meetings', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Re-queue failed')
+      toast.success(
+        `${data.requeued} meetings re-queued for analysis. ` +
+        `Run "Sync Now" on Avoma to process them.`
+      )
+    } catch (err) {
+      toast.error(`Re-queue failed: ${String(err)}`)
+    } finally {
+      setRequeueing(false)
     }
   }
 
@@ -373,6 +391,50 @@ export default function IntegrationsPage() {
                   Last scored: {new Date(lastChurnScoredAt).toLocaleString()}
                 </p>
               )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Separator />
+
+        {/* Data Quality */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-md bg-amber-500/10 flex items-center justify-center shrink-0">
+                <RefreshCw className="w-4 h-4 text-amber-400" />
+              </div>
+              <div>
+                <CardTitle className="text-base">Data Quality</CardTitle>
+                <CardDescription className="text-xs mt-0.5">
+                  Repair meetings that were marked as analyzed but may have had extraction failures.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-md border border-border bg-muted/20 p-3 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium">Re-analyze underperforming meetings</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Re-queues large Avoma meetings (April 2026 onward) that were analyzed but produced
+                  zero feedback items — likely victims of a past JSON parsing issue. After re-queuing,
+                  run Sync Now on Avoma to process them.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={requeueMeetings}
+                disabled={requeueing}
+                className="shrink-0"
+              >
+                {requeueing ? (
+                  <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Re-queuing...</>
+                ) : (
+                  'Re-queue Meetings'
+                )}
+              </Button>
             </div>
           </CardContent>
         </Card>

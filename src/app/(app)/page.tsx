@@ -140,9 +140,10 @@ export default async function DashboardPage({
       rangeStart = startDate ? new Date(startDate) : new Date(allItems.map(i => i.date).sort()[0])
       rangeEnd = endDate ? new Date(endDate) : today
     } else {
+      // Default: show the full span of all available data so nothing is hidden
       rangeEnd = today
-      rangeStart = new Date(today)
-      rangeStart.setDate(rangeStart.getDate() - 13)
+      const earliest = allItems.map(i => i.date).sort()[0]
+      rangeStart = earliest ? new Date(earliest) : new Date(today.getTime() - 13 * 86400000)
     }
 
     const dayCount = Math.round((rangeEnd.getTime() - rangeStart.getTime()) / 86400000) + 1

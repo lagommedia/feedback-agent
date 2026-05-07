@@ -632,8 +632,19 @@ export async function getUnanalyzedAvomaTranscripts(limit = 100): Promise<import
          SELECT 1 FROM analyzed_sources ans
          WHERE ans.source_id = at.meeting_uuid
        )
-       AND at.data->>'meetingTitle' NOT ILIKE 'Call with %'
+       -- Require at least 8 spoken segments — filters silent/failed recordings
        AND jsonb_array_length(at.data->'segments') >= 8
+       -- Skip obviously internal meetings that slip past is_internal=false
+       AND at.data->>'meetingTitle' NOT ILIKE '%standup%'
+       AND at.data->>'meetingTitle' NOT ILIKE '%stand-up%'
+       AND at.data->>'meetingTitle' NOT ILIKE '% 1:1%'
+       AND at.data->>'meetingTitle' NOT ILIKE '%1-on-1%'
+       AND at.data->>'meetingTitle' NOT ILIKE '%one on one%'
+       AND at.data->>'meetingTitle' NOT ILIKE '%all hands%'
+       AND at.data->>'meetingTitle' NOT ILIKE '%all-hands%'
+       AND at.data->>'meetingTitle' NOT ILIKE '%team sync%'
+       AND at.data->>'meetingTitle' NOT ILIKE '%interview%'
+       AND at.data->>'meetingTitle' NOT ILIKE '%recruiting%'
      ORDER BY (at.data->>'date') DESC
      LIMIT $1`,
     [limit]
@@ -698,8 +709,17 @@ export async function getUnanalyzedCounts(): Promise<{ avoma: number; front: num
     pool.query(`SELECT COUNT(*) FROM avoma_transcripts at
       WHERE NOT EXISTS (SELECT 1 FROM feedback_items fi WHERE fi.data->>'rawSourceId' = at.meeting_uuid)
         AND NOT EXISTS (SELECT 1 FROM analyzed_sources ans WHERE ans.source_id = at.meeting_uuid)
-        AND at.data->>'meetingTitle' NOT ILIKE 'Call with %'
-        AND jsonb_array_length(at.data->'segments') >= 8`),
+        AND jsonb_array_length(at.data->'segments') >= 8
+        AND at.data->>'meetingTitle' NOT ILIKE '%standup%'
+        AND at.data->>'meetingTitle' NOT ILIKE '%stand-up%'
+        AND at.data->>'meetingTitle' NOT ILIKE '% 1:1%'
+        AND at.data->>'meetingTitle' NOT ILIKE '%1-on-1%'
+        AND at.data->>'meetingTitle' NOT ILIKE '%one on one%'
+        AND at.data->>'meetingTitle' NOT ILIKE '%all hands%'
+        AND at.data->>'meetingTitle' NOT ILIKE '%all-hands%'
+        AND at.data->>'meetingTitle' NOT ILIKE '%team sync%'
+        AND at.data->>'meetingTitle' NOT ILIKE '%interview%'
+        AND at.data->>'meetingTitle' NOT ILIKE '%recruiting%'`),
     pool.query(`SELECT COUNT(*) FROM front_conversations fc
       JOIN (
         SELECT data->>'conversationId' AS conv_id,
@@ -721,6 +741,40 @@ export async function getUnanalyzedCounts(): Promise<{ avoma: number; front: num
     avoma: parseInt(avoma.rows[0].count),
     front: parseInt(front.rows[0].count),
   }
+}
+
+/**
+ * Re-queues large Avoma meetings that were marked as analyzed but produced zero
+ * feedback items — almost certainly victims of JSON parse failures in past runs.
+ *
+ * Only targets meetings from the given start date onward so Jan–Mar (which have
+ * a normal ~25-30% zero-feedback rate) are left untouched.
+ *
+ * Returns the number of meetings re-queued for re-analysis.
+ */
+export async function requeueUnproductiveMeetings(
+  minSegments = 50,
+  since = '2026-04-01',
+): Promise<number> {
+  await ensureSchema()
+  const pool = getPool()
+  const res = await pool.query(
+    `DELETE FROM analyzed_sources
+     WHERE source_id IN (
+       SELECT at.meeting_uuid
+       FROM avoma_transcripts at
+       WHERE jsonb_array_length(at.data->'segments') >= $1
+         AND (at.data->>'date') >= $2
+         AND EXISTS (
+           SELECT 1 FROM analyzed_sources ans WHERE ans.source_id = at.meeting_uuid
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM feedback_items fi WHERE fi.data->>'rawSourceId' = at.meeting_uuid
+         )
+     )`,
+    [minSegments, since],
+  )
+  return res.rowCount ?? 0
 }
 
 // ─── Chat Sessions ────────────────────────────────────────────────────────────

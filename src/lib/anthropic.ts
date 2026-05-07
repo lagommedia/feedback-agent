@@ -205,11 +205,31 @@ function slackMessagesToContent(
 // Max characters of content to send per item — prevents token limit errors on huge transcripts
 const MAX_CONTENT_CHARS = 8000
 
+/** Returns true for transient API errors that are safe to retry (overloaded, rate-limited). */
+function isRetryableApiError(err: unknown): boolean {
+  if (typeof err === 'object' && err !== null) {
+    const status = (err as { status?: number }).status
+    if (status === 529 || status === 429 || status === 503) return true
+  }
+  const msg = String(err).toLowerCase()
+  return msg.includes('529') || msg.includes('overloaded') || msg.includes('rate_limit') || msg.includes('503')
+}
+
+// One quick retry per chunk (10 s). If still overloaded the Vercel function fails fast
+// and the client-side loop waits 60–120 s before calling /api/analyze again.
+const CHUNK_RETRY_DELAYS_MS = [10_000] // 1 retry → up to ~10 s overhead per chunk
+
+/**
+ * Returns extracted FeedbackItems (may be empty if none found),
+ * or `null` if Claude's response could not be parsed as JSON.
+ * Callers MUST NOT mark source IDs as analyzed when null is returned —
+ * a null result means the batch is safe to retry on the next run.
+ */
 async function analyzeChunk(
   client: Anthropic,
   items: RawContentItem[],
   systemPrompt: string
-): Promise<FeedbackItem[]> {
+): Promise<FeedbackItem[] | null> {
   const userContent = items
     .map((item, i) => {
       const header = `--- Item ${i + 1} (ID: ${item.id}, Source: ${item.source}, Date: ${item.date}) ---`
@@ -222,25 +242,40 @@ async function analyzeChunk(
     })
     .join('\n\n')
 
-  let response
-  try {
-    response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 8192,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userContent }],
-    })
-  } catch (apiErr) {
-    // Surface API errors (credits, rate limits, token limits) rather than silently returning []
-    throw apiErr
+  let response: Anthropic.Message | undefined
+  for (let attempt = 0; attempt <= CHUNK_RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      response = await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 8192,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userContent }],
+      })
+      break // success — exit retry loop
+    } catch (apiErr) {
+      if (isRetryableApiError(apiErr) && attempt < CHUNK_RETRY_DELAYS_MS.length) {
+        const delay = CHUNK_RETRY_DELAYS_MS[attempt]
+        console.warn(`[analyzeChunk] Retryable error (attempt ${attempt + 1}), waiting ${delay / 1000}s…`, String(apiErr))
+        await new Promise((res) => setTimeout(res, delay))
+        continue
+      }
+      // Non-retryable or out of attempts — surface the error
+      throw apiErr
+    }
   }
 
-  const text = response.content[0].type === 'text' ? response.content[0].text : '[]'
+  if (!response) return null // should never happen — loop always breaks or throws
+
+  const text = response.content[0].type === 'text' ? response.content[0].text : ''
+
+  // Empty response → no feedback found (NOT a parse failure — mark as analyzed)
+  if (!text.trim() || text.trim() === '[]') return []
 
   try {
     // Strip any accidental markdown code fences
     const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
     const parsed = JSON.parse(cleaned)
+    // Claude sometimes returns a non-array wrapper — not a parse failure, just no items
     if (!Array.isArray(parsed)) return []
 
     return parsed.map((item) => ({
@@ -259,8 +294,10 @@ async function analyzeChunk(
       analyzedAt: new Date().toISOString(),
     }))
   } catch {
-    console.error('[analyzeChunk] JSON parse failed. Raw response:', text.slice(0, 500))
-    return []
+    // JSON parse failure — return null so the caller does NOT mark these as analyzed.
+    // They will be re-fetched and retried on the next analysis run.
+    console.error('[analyzeChunk] JSON parse failed — batch will be retried. Raw:', text.slice(0, 300))
+    return null
   }
 }
 
@@ -340,16 +377,28 @@ export async function analyzeAllContent(
   // Process in batches of 5 — smaller batches prevent output token truncation
   // (15 meetings × 3+ feedback items × ~300 tokens each would exceed 4096 max_tokens)
   const BATCH_SIZE = 5
+  // Small pause between Claude calls to avoid saturating the API and triggering 529s
+  const INTER_BATCH_DELAY_MS = 1_000
   for (let i = 0; i < allItems.length; i += BATCH_SIZE) {
+    if (i > 0) {
+      await new Promise((res) => setTimeout(res, INTER_BATCH_DELAY_MS))
+    }
     const batch = allItems.slice(i, i + BATCH_SIZE)
     const results = await analyzeChunk(client, batch, systemPrompt)
+
+    if (results === null) {
+      // JSON parse failure — do NOT mark as analyzed so the batch is retried next run.
+      console.warn(`[analyzeAllContent] Parse failure on batch ${i / BATCH_SIZE + 1}, skipping analyzed marking.`)
+      continue
+    }
+
     newFeedbackItems.push(...results)
-    // Always save feedback items found
+    // Save any feedback items found
     if (results.length > 0 && onBatchComplete) {
       await onBatchComplete(results)
     }
-    // Always mark ALL source IDs in this batch as analyzed, even if no feedback found.
-    // This prevents the same no-feedback meetings from being re-fetched on every run.
+    // Mark ALL source IDs as analyzed (even if no feedback found).
+    // This prevents no-feedback meetings from being re-fetched on every run.
     if (onBatchAnalyzed) {
       await onBatchAnalyzed(batch.map((item) => item.id))
     }

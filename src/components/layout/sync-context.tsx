@@ -51,6 +51,50 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { refreshConfig() }, [refreshConfig])
 
+  // Run /api/analyze in a loop until no unanalyzed items remain.
+  // Each call processes ~75 Avoma + ~35 Front transcripts (≈ one Vercel function invocation).
+  // Retries up to 3 times with a 30s back-off when the API is overloaded.
+  // Returns total new items extracted.
+  const runAnalysisLoop = useCallback(async (): Promise<number> => {
+    let totalNew = 0
+    let iteration = 0
+    let consecutiveFailures = 0
+    const MAX_ITERATIONS = 60        // safety cap — handles backlogs up to ~6,600 items
+    const MAX_CONSECUTIVE_FAILURES = 3
+
+    while (iteration < MAX_ITERATIONS) {
+      iteration++
+      try {
+        const analyzeRes = await fetch('/api/analyze', { method: 'POST' })
+        const analyzeData = await analyzeRes.json()
+        if (!analyzeRes.ok) throw new Error(analyzeData.error ?? 'Analysis failed')
+
+        consecutiveFailures = 0
+        totalNew += analyzeData.newItems ?? 0
+
+        const remaining = (analyzeData.remaining?.avoma ?? 0) + (analyzeData.remaining?.front ?? 0)
+
+        if (remaining > 0) {
+          // Show progress so the user knows it's still running
+          toast.info(`Analyzing… ${remaining} item${remaining !== 1 ? 's' : ''} remaining`)
+        } else {
+          break
+        }
+      } catch (err) {
+        consecutiveFailures++
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+          throw err
+        }
+        // Anthropic 529 overloaded errors need a genuine cool-down before retrying.
+        const waitSec = consecutiveFailures === 1 ? 60 : 90
+        toast.info(`API busy — retrying in ${waitSec}s… (attempt ${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES})`)
+        await new Promise((res) => setTimeout(res, waitSec * 1000))
+      }
+    }
+
+    return totalNew
+  }, [])
+
   const syncSource = useCallback(async (source: SyncSource) => {
     setStates(prev => ({ ...prev, [source]: { ...prev[source], syncing: true, error: undefined } }))
     try {
@@ -61,18 +105,16 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       setStates(prev => ({ ...prev, [source]: { ...prev[source], syncing: false, count: syncData.count, analyzing: true } }))
       toast.success(`${source.charAt(0).toUpperCase() + source.slice(1)}: synced ${syncData.count} records`)
 
-      const analyzeRes = await fetch('/api/analyze', { method: 'POST' })
-      const analyzeData = await analyzeRes.json()
-      if (!analyzeRes.ok) throw new Error(analyzeData.error ?? 'Analysis failed')
+      const totalNew = await runAnalysisLoop()
 
       setStates(prev => ({ ...prev, [source]: { ...prev[source], analyzing: false, lastSyncedAt: new Date().toISOString() } }))
-      toast.success(`Analysis complete: ${analyzeData.newItems} new feedback items`)
+      toast.success(`Analysis complete: ${totalNew} new feedback item${totalNew !== 1 ? 's' : ''}`)
     } catch (err) {
       setStates(prev => ({ ...prev, [source]: { ...prev[source], syncing: false, analyzing: false, error: String(err) } }))
       toast.error(String(err))
       throw err
     }
-  }, [])
+  }, [runAnalysisLoop])
 
   const syncAll = useCallback(async () => {
     const sources: SyncSource[] = ['avoma', 'front', 'slack']
@@ -106,24 +148,14 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       slack: { ...prev.slack, analyzing: true },
     }))
     try {
-      const analyzeRes = await fetch('/api/analyze', { method: 'POST' })
-      const analyzeData = await analyzeRes.json()
+      const totalNew = await runAnalysisLoop()
       const now = new Date().toISOString()
-      if (analyzeRes.ok) {
-        toast.success(`Analysis complete: ${analyzeData.newItems} new feedback items`)
-        setStates(prev => ({
-          avoma: { ...prev.avoma, analyzing: false, lastSyncedAt: now },
-          front: { ...prev.front, analyzing: false, lastSyncedAt: now },
-          slack: { ...prev.slack, analyzing: false, lastSyncedAt: now },
-        }))
-      } else {
-        toast.error(analyzeData.error ?? 'Analysis failed')
-        setStates(prev => ({
-          avoma: { ...prev.avoma, analyzing: false },
-          front: { ...prev.front, analyzing: false },
-          slack: { ...prev.slack, analyzing: false },
-        }))
-      }
+      toast.success(`Analysis complete: ${totalNew} new feedback item${totalNew !== 1 ? 's' : ''}`)
+      setStates(prev => ({
+        avoma: { ...prev.avoma, analyzing: false, lastSyncedAt: now },
+        front: { ...prev.front, analyzing: false, lastSyncedAt: now },
+        slack: { ...prev.slack, analyzing: false, lastSyncedAt: now },
+      }))
     } catch (err) {
       toast.error(String(err))
       setStates(prev => ({
@@ -132,7 +164,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         slack: { ...prev.slack, analyzing: false },
       }))
     }
-  }, [])
+  }, [runAnalysisLoop])
 
   return (
     <SyncContext.Provider value={{ states, anthropicConfigured, refreshConfig, syncSource, syncAll }}>

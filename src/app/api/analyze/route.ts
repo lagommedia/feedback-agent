@@ -34,11 +34,11 @@ export async function POST() {
       return NextResponse.json({ newItems: 0, remaining: { avoma: 0, front: 0 } })
     }
 
-    // Fetch ONLY unanalyzed items — smaller batches to stay well within Vercel's 5-min limit
-    // Avoma transcripts: limit 50, front conversations: limit 30
+    // Fetch ONLY unanalyzed items — stay well within Vercel's 5-min limit
+    // 50 Avoma + 25 Front = 15 Claude batches of 5 × ~12s avg = ~180s, well under 300s
     const [avomaTranscripts, frontData, slack, trainingExamples] = await Promise.all([
       getUnanalyzedAvomaTranscripts(50),
-      getUnanalyzedFrontConversations(30),
+      getUnanalyzedFrontConversations(25),
       readSlackRaw(),
       getTrainingExamples(),
     ])
